@@ -1,6 +1,7 @@
 // Tests for the Kitchen features: six families, 15 fusions, SPICE, KEEP skeleton, tempo-synced length.
 #include "TestFramework.h"
 #include "Generator/CandyGenerator.h"
+#include "Sequencer/ContextBuilder.h"
 #include <set>
 
 using namespace dali;
@@ -143,4 +144,82 @@ DTEST(tempo_synced_lengths_fit_their_window)
                           std::string(familyName(f)) + " " + std::to_string(beats) + " beats: " + std::to_string(d.durationMs) + " ms vs " + std::to_string(g.customLengthMs));
             }
     CHECK_MSG(ok * 3 >= tries * 2, "synced candidates accepted " + std::to_string(ok) + "/" + std::to_string(tries));
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// Context-aware placement
+// ---------------------------------------------------------------------------------------------------------------------------
+namespace
+{
+// 4 bars at 120 bpm: kick on every beat; dense bright hats in bars 1 and 3 only
+TrackAnalysis syntheticTrack(float density = 0.9f)
+{
+    const double sr = 44100.0; const int bars = 4, N = (int) (bars * 4 * 0.5 * sr); std::vector<float> x((size_t) N, 0.0f); juce::Random rnd(9);
+    for (int b = 0; b < bars * 4; ++b)
+    {
+        const int kk = (int) (b * 0.5 * sr); for (int i = 0; i < 7000 && kk + i < N; ++i) x[(size_t) (kk + i)] += 0.8f * std::sin(6.28318f * 55.0f * (float) i / (float) sr) * std::exp(-(float) i / 1800.0f);
+    }
+    for (int bar : { 0, 2 })
+        for (int s = 0; s < 16; ++s) { const int h = (int) ((bar * 16 + s) * 0.125 * sr); for (int i = 0; i < 2600 && h + i < N; ++i) { const float n = rnd.nextFloat() * 2 - 1; x[(size_t) (h + i)] += 0.35f * n * std::exp(-(float) i / 700.0f); } }
+    auto a = analyzeTrack(x.data(), N, sr, 120.0, 4);
+    generateSuggestions(a, density, 0.2f, 5);
+    return a;
+}
+PaletteEntry entry(int slot, std::array<float, kNumBands> bands, MusicalRole role = MusicalRole::Accent, float ms = 250.0f) { PaletteEntry e; e.slot = slot; e.bands = bands; e.role = role; e.durationMs = ms; return e; }
+}
+
+DTEST(context_builder_fits_sounds_to_the_free_band)
+{
+    auto a = syntheticTrack(); CHECK(a.valid && a.suggestions.size() >= 8);
+    const auto dark = entry(0, { 0.0f, 0.05f, 0.35f, 0.4f, 0.15f, 0.05f, 0.0f, 0.0f });      // lives in the mids
+    const auto bright = entry(1, { 0.0f, 0.0f, 0.0f, 0.02f, 0.08f, 0.3f, 0.4f, 0.2f });      // lives in the highs
+    ContextOptions o; o.variety = 0.1f;
+    auto mask = [&](const PaletteEntry& p, int step) { float m = 0; for (int b = 0; b < kNumBands; ++b) m += p.bands[(size_t) b] * a.band[(size_t) b][(size_t) step]; return m; };
+    int better = 0, n = 0, brightPicked = 0; double chosenMask = 0, otherMask = 0;
+    for (uint32_t seed = 1; seed <= 6; ++seed)
+    {
+        o.seed = seed; auto ev = buildContextEvents(a, { dark, bright }, o);
+        for (auto& e : ev)
+        {
+            const int step = (int) std::lround(e.position / 0.25); const auto& ch = e.slot == 1 ? bright : dark; const auto& ot = e.slot == 1 ? dark : bright;
+            ++n; if (mask(ch, step) <= mask(ot, step) + 1e-4f) ++better; chosenMask += mask(ch, step); otherMask += mask(ot, step); brightPicked += e.slot == 1;
+        }
+    }
+    CHECK(n >= 12);
+    CHECK_MSG(better * 100 >= n * 75, "the sound that masks less was chosen in " + std::to_string(better) + " of " + std::to_string(n));
+    CHECK_MSG(chosenMask < otherMask * 0.8, "chosen masking " + std::to_string(chosenMask) + " vs the alternative " + std::to_string(otherMask));
+    CHECK_MSG(brightPicked > 0 && brightPicked < n, "both sounds are used");
+}
+
+DTEST(context_builder_avoids_hits_spreads_over_the_palette_and_respects_room)
+{
+    auto a = syntheticTrack();
+    std::vector<PaletteEntry> pal;
+    for (int i = 0; i < 5; ++i) pal.push_back(entry(i, { 0.0f, 0.02f, 0.1f, 0.2f, 0.25f, 0.2f, 0.15f, 0.08f }, MusicalRole::Accent, 120.0f + 60.0f * (float) i));
+    ContextOptions o; o.variety = 0.85f; o.seed = 11; ContextReport rep; auto ev = buildContextEvents(a, pal, o, &rep);
+    CHECK(ev.size() >= 8);
+    int repeats = 0, distinct = 0; for (int n : rep.perSlot) distinct += n > 0 ? 1 : 0;
+    for (size_t i = 1; i < ev.size(); ++i) if (ev[i].slot == ev[i - 1].slot) ++repeats;
+    CHECK_MSG(distinct >= 4, "different sounds used " + std::to_string(distinct));
+    CHECK_MSG(repeats * 6 <= (int) ev.size(), "back-to-back repeats " + std::to_string(repeats) + " of " + std::to_string(ev.size()));
+    for (auto& e : ev)
+    {
+        const int step = (int) std::lround(e.position / 0.25);
+        CHECK(a.onset[(size_t) step] < 0.45f);                                   // never on top of a hit
+        CHECK(e.lengthBeats > 0.0f && e.lengthBeats <= 0.25f + 1e-6f);           // sounds are only ever shortened to fit the room
+        CHECK(e.frozen && e.velocity >= 0.12f && e.velocity <= 1.0f);
+    }
+    CHECK(buildContextEvents(a, pal, o).size() == ev.size());                    // deterministic
+}
+
+DTEST(context_builder_leads_into_section_changes_with_a_transition)
+{
+    auto a = syntheticTrack(0.6f); a.sectionBars = { 0, 2 };
+    const auto riser = entry(3, { 0.0f, 0.0f, 0.05f, 0.15f, 0.3f, 0.3f, 0.15f, 0.05f }, MusicalRole::Transition, 900.0f);
+    const auto tick = entry(0, { 0.0f, 0.0f, 0.1f, 0.3f, 0.3f, 0.2f, 0.08f, 0.02f }, MusicalRole::Punctuation, 90.0f);
+    ContextOptions o; o.variety = 0.3f; ContextReport rep; auto ev = buildContextEvents(a, { tick, riser }, o, &rep);
+    bool riserBeforeChange = false; for (auto& e : ev) if (e.slot == 3 && e.position >= 6.5 && e.position <= 8.0) riserBeforeChange = true;
+    CHECK_MSG(riserBeforeChange, "no transition sound in the last beat before bar 3");
+    int risersElsewhere = 0; for (auto& e : ev) if (e.slot == 3 && (e.position < 6.5 || e.position > 8.0)) ++risersElsewhere;
+    CHECK_MSG(risersElsewhere <= 1, "transition sounds used away from section changes: " + std::to_string(risersElsewhere));
 }

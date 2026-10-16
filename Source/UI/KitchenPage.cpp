@@ -179,7 +179,12 @@ KitchenPage::KitchenPage(CandyProcessor& p) : PageBase(p), keys(p)
     cook.setTooltip("COOK: eight new plates from the chosen family / fusion"); listen.setTooltip("LISTEN: capture the track (Analysis Source), place candy in its gaps and aim the sound at the quietest band");
     roll.onClick = [this] { proc.roll(); }; cook.onClick = [this] { proc.generate(); };
     listen.onClick = [this] { proc.listen(); };
-    for (auto* b : { &roll, &cook, &listen }) addAndMakeVisible(b);
+    buildBtn.setColour(juce::TextButton::buttonColourId, col::magenta.withAlpha(0.35f));
+    buildBtn.setTooltip("BUILD: arrange the eight plates over the analysed track (gaps, free bands, transitions). Press LISTEN first if no track was analysed.");
+    buildBtn.onClick = [this] { proc.buildPattern(true); };
+    playSeq = std::make_unique<ParamToggle>(proc.apvts, pid::seqOn, "PLAY SEQUENCE", col::magenta); addAndMakeVisible(*playSeq);
+    playSeq->setTooltip("Plays the built pattern with the host transport. Off by default: nothing plays until you switch it on.");
+    for (auto* b : { &roll, &cook, &listen, &buildBtn }) addAndMakeVisible(b);
     octDown.onClick = [this] { keys.release(); keys.base = std::max(24, keys.base - 12); keys.repaint(); };
     octUp.onClick = [this] { keys.release(); keys.base = std::min(84, keys.base + 12); keys.repaint(); };
     for (auto* b : { &octDown, &octUp }) pDish.addAndMakeVisible(b);
@@ -212,7 +217,7 @@ void KitchenPage::resized()
 {
     auto r = getLocalBounds().reduced(8);
     auto top = r.removeFromTop(52);
-    roll.setBounds(top.removeFromLeft(210)); top.removeFromLeft(8); cook.setBounds(top.removeFromLeft(150)); top.removeFromLeft(8); listen.setBounds(top.removeFromLeft(150)); top.removeFromLeft(14); status.setBounds(top);
+    roll.setBounds(top.removeFromLeft(210)); top.removeFromLeft(8); cook.setBounds(top.removeFromLeft(150)); top.removeFromLeft(8); listen.setBounds(top.removeFromLeft(120)); top.removeFromLeft(8); buildBtn.setBounds(top.removeFromLeft(100)); top.removeFromLeft(8); playSeq->setBounds(top.removeFromLeft(150).withSizeKeepingCentre(150, 26)); top.removeFromLeft(10); status.setBounds(top);
     r.removeFromTop(8);
     auto bottom = r.removeFromBottom(150); r.removeFromBottom(8);
     pPlates.setBounds(bottom);
@@ -271,7 +276,7 @@ void KitchenPage::refresh(uint32_t f)
 void KitchenPage::tick()
 {
     const bool busy = proc.busy();
-    cook.setEnabled(! busy); roll.setEnabled(! busy); listen.setEnabled(! busy);
+    cook.setEnabled(! busy); roll.setEnabled(! busy); listen.setEnabled(! busy); buildBtn.setEnabled(! busy);
     if (cookPending && ! busy) { cookPending = false; proc.generate(); }
     if (busy || progressShown > 0.0f) { progressShown = busy ? proc.progress() : 0.0f; repaint(); }
     status.setText(proc.statusText(), juce::dontSendNotification);

@@ -40,6 +40,7 @@ inline constexpr const char* euRotate = "euRotate";
 inline constexpr const char* seqEvolve = "seqEvolve";
 inline constexpr const char* seqFreeze = "seqFreeze";
 inline constexpr const char* seqFreeRun = "seqFreeRun";
+inline constexpr const char* variety = "variety";    // how widely the sequence spreads over the eight plates
 // performance macros feeding the modulation matrix
 inline constexpr const char* macro1 = "macro1";
 inline constexpr const char* macro2 = "macro2";

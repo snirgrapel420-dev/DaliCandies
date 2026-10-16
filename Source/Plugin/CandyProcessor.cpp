@@ -1,4 +1,5 @@
 #include "CandyProcessor.h"
+#include "Sequencer/ContextBuilder.h"
 #if DALI_WITH_EDITOR
  #include "UI/CandyEditor.h"
 #endif
@@ -47,6 +48,7 @@ CandyProcessor::CandyProcessor(bool isFx)
     for (auto* id : { pid::seqOn, pid::seqMode, pid::seqBars, pid::seqDiv, pid::seqFeel, pid::seqSwing, pid::seqProb, pid::seqRatchetProb, pid::seqRatchetMax, pid::seqMicro,
                       pid::seqVel, pid::seqVelRange, pid::seqPitchVar, pid::seqLength, pid::euSteps, pid::euHits, pid::euRotate, pid::seqFreeze, pid::quality, pid::category })
         apvts.addParameterListener(id, this);
+    preset_.seq.enabled = false;                                  // nothing plays on Play until a pattern has been built for this track
     applyParamsFromPreset(preset_);
     rebuildPatternNow(false);
     startTimerHz(30);
@@ -305,7 +307,7 @@ void CandyProcessor::applyParamsFromPreset(const Preset& p)
     setParam(apvts, rootNote, (float) g.rootNote); setParam(apvts, scale, (float) g.scale);
     if (g.familyA >= 0) { setParam(apvts, famA, (float) (g.familyA + 1)); setParam(apvts, famB, (float) (g.familyB + 1)); setParam(apvts, spice, g.spice * 100.0f); }   // presets from before the Kitchen keep the current selection
     const auto& s = p.seq;
-    setParam(apvts, seqOn, s.enabled ? 1.0f : 0.0f); setParam(apvts, seqMode, (float) (int) s.mode); setParam(apvts, seqBars, (float) s.bars);
+    setParam(apvts, seqMode, (float) (int) s.mode); setParam(apvts, seqBars, (float) s.bars);
     setParam(apvts, seqDiv, (float) s.division); setParam(apvts, seqFeel, (float) s.feel); setParam(apvts, seqSwing, s.swing * 100.0f);
     setParam(apvts, seqProb, s.probability * 100.0f); setParam(apvts, seqRatchetProb, s.ratchetProb * 100.0f); setParam(apvts, seqRatchetMax, (float) s.ratchetMax);
     setParam(apvts, seqMicro, s.microtimingMs); setParam(apvts, seqVel, s.velBase * 100.0f); setParam(apvts, seqVelRange, s.velRange * 100.0f);
@@ -574,7 +576,9 @@ void CandyProcessor::generate()
             { const juce::ScopedLock sl(lock_); candidates_ = std::move(views); n = (int) candidates_.size();
               status_ = juce::String(n) + " " + how + aim + " (" + juce::String(st.rejected) + " rejected of " + juce::String(st.tried) + " tried)"; }
             flagChange(kChCandidates | kChStatus);
+            if (n > 0) platesToPalette();
             if (rollPending_.exchange(false) && n > 0) selectCandidate((int) (rollPick_ % (uint32_t) n));
+            if (n > 0 && (buildAfterCook_.exchange(false) || (analysis() != nullptr && apvts.getRawParameterValue(pid::seqOn)->load() > 0.5f))) applySuggestionsToSequence();
         });
     });
 }
@@ -602,10 +606,28 @@ void CandyProcessor::listen()
     startCapture();
 }
 
+void CandyProcessor::platesToPalette()
+{
+    {   const juce::ScopedLock sl(lock_);
+        const int n = std::min((int) candidates_.size(), kNumSoundSlots);
+        for (int i = 0; i < kNumSoundSlots; ++i)
+        {
+            if (i < n) { preset_.slots[(size_t) i] = candidates_[(size_t) i].dna; preset_.slotUsed[(size_t) i] = true; }
+            else preset_.slotUsed[(size_t) i] = false;
+        }
+        preset_.mainSlot = 0; if (n > 0) history_.push(preset_.slots[0]);
+    }
+    rebuildBankNow(); flagChange(kChSound | kChPattern);
+}
+
 void CandyProcessor::selectCandidate(int index)
 {
-    CandyDNA d; { const juce::ScopedLock sl(lock_); if (index < 0 || index >= (int) candidates_.size()) return; d = candidates_[(size_t) index].dna; }
-    setMainSound(d, true); audition();
+    CandyDNA d; bool inPalette = false;
+    {   const juce::ScopedLock sl(lock_); if (index < 0 || index >= (int) candidates_.size()) return; d = candidates_[(size_t) index].dna;
+        inPalette = index < kNumSoundSlots && preset_.slotUsed[(size_t) index] && preset_.slots[(size_t) index].id == d.id;
+        if (inPalette) { preset_.mainSlot = index; history_.push(d); } }
+    if (inPalette) { flagChange(kChSound); audition(index); return; }       // the plate already lives in its slot: just make it the current one
+    setMainSound(d, true); audition(mainSlot());
 }
 
 void CandyProcessor::candidateToSlot(int index, int slot)
@@ -733,7 +755,7 @@ void CandyProcessor::beginAnalysis(std::vector<float> mono, double sr, double bp
         {
             { const juce::ScopedLock sl(lock_); analysis_ = shared; status_ = "Analysis ready: " + juce::String(shared->bars) + " bars, " + juce::String((int) shared->suggestions.size()) + " suggestions"; }
             updateAdaptive(); flagChange(kChAnalysis | kChStatus);
-            if (listenPending_.exchange(false)) { applySuggestionsToSequence(); generate(); }
+            if (listenPending_.exchange(false)) { buildAfterCook_ = true; generate(); }
         });
     });
 }
@@ -755,20 +777,31 @@ void CandyProcessor::regenerateSuggestions()
 void CandyProcessor::applySuggestionsToSequence()
 {
     auto a = analysis(); if (a == nullptr) return;
-    std::vector<SeqEvent> ev; Rng r(hashCombine(0xBEEF, genCounter_++)); const int slots = seqContext().numSlots;
-    const SeqConfig cfg = seqConfig();
-    for (auto& s : a->suggestions)
-    {
-        if (s.rejected) continue;
-        SeqEvent e; e.position = (double) s.step * 0.25; e.velocity = std::clamp(cfg.velBase + r.bipolar() * cfg.velRange, 0.1f, 1.0f);
-        e.slot = slots > 1 ? r.rangeInt(0, slots - 1) : 0; e.lengthBeats = cfg.lengthBeats; e.modSeed = r.next(); e.frozen = true; e.locked = s.locked;
-        e.pitchOffset = std::round(r.normal() * cfg.pitchVariation * 0.7f); ev.push_back(e);
-    }
+    std::vector<PaletteEntry> pal;
+    {   const juce::ScopedLock sl(lock_);
+        for (int i = 0; i < kNumSoundSlots; ++i) if (preset_.slotUsed[(size_t) i])
+        {   const auto& d = preset_.slots[(size_t) i]; PaletteEntry e; e.slot = i; e.bands = d.spectral.bands; e.durationMs = std::max(20.0f, d.durationMs); e.role = d.role; pal.push_back(e); } }
+    const auto gs = genSettingsFrom(apvts); const SeqConfig cfg = seqConfig();
+    ContextOptions o; o.variety = apvts.getRawParameterValue(pid::variety)->load() * 0.01f; o.velBase = cfg.velBase; o.velRange = cfg.velRange; o.pitchVariation = cfg.pitchVariation;
+    o.rootNote = gs.rootNote; o.scale = gs.scale; o.musicality = gs.musicality; o.seed = hashCombine(0xBEEF, genCounter_++);
+    ContextReport rep; auto ev = buildContextEvents(*a, pal, o, &rep);
     setParam(apvts, pid::seqBars, (float) std::clamp(a->bars, 1, 32));
-    { const juce::ScopedLock sl(lock_); preset_.seq.events = ev; preset_.seq.bars = std::clamp(a->bars, 1, 32); preset_.seq.freezeAll = true; }
-    setParam(apvts, pid::seqFreeze, 1.0f);
+    { const juce::ScopedLock sl(lock_); preset_.seq.events = ev; preset_.seq.bars = std::clamp(a->bars, 1, 32); preset_.seq.freezeAll = true; preset_.seq.enabled = true; }
+    setParam(apvts, pid::seqFreeze, 1.0f); setParam(apvts, pid::seqOn, 1.0f);
     seqDirty_ = false; rebuildPatternNow(false);
-    const juce::ScopedLock sl(lock_); status_ = "Placed " + juce::String((int) ev.size()) + " candy events from the analysis";
+    int used = 0; for (int n : rep.perSlot) used += n > 0 ? 1 : 0;
+    const juce::ScopedLock sl(lock_); status_ = "Placed " + juce::String((int) ev.size()) + " events in the gaps of the track using " + juce::String(used) + " different sound(s)"
+                                                + (rep.transitions > 0 ? ", " + juce::String(rep.transitions) + " transition(s) into section changes" : juce::String());
+    flagChange(kChStatus | kChPattern);
+}
+
+void CandyProcessor::buildPattern(bool newSeed)
+{
+    if (analysis() != nullptr) { if (newSeed) regenerateSuggestions(); applySuggestionsToSequence(); return; }
+    setParam(apvts, pid::seqOn, 1.0f); setParam(apvts, pid::seqFreeze, 0.0f);
+    { const juce::ScopedLock sl(lock_); preset_.seq.enabled = true; preset_.seq.freezeAll = false; }
+    regeneratePattern(newSeed);
+    const juce::ScopedLock sl(lock_); status_ = "No track analysed: pattern planned from rhythm only. Use LISTEN (or Import WAV) so it can place sounds in the gaps of your track";
     flagChange(kChStatus);
 }
 

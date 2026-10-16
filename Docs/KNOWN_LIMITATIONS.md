@@ -36,6 +36,8 @@
 22. LISTEN steering uses the lowest *average* band level between 400 Hz and 12 kHz of the captured audio; it is a simple gap finder, not a model of what is musically missing. On an instrument track (no audio input) LISTEN cannot capture; use *Import WAV* in Track analysis, then generate with the *Listen* parameter on.
 23. ROLL is random by design (seeded from the clock); two ROLLs never repeat, but `rollWith(seed)` is reproducible (tested).
 24. The on-screen keyboard, flavour matrix, drag pads and plates were exercised only headlessly (snapshots, smoke test); no human has clicked them in a real host.
+25. The sequencer starts OFF and presets never switch it on (this removed the constant sound on Play). Generating plates overwrites all eight sound slots (MIDI channels 1-8 play the plates).
+26. Context placement does not detect the key of the track: pitch follows the user's Root/Scale setting. Events are dropped where no free step exists within +-3 steps, so dense tracks get fewer events. What counts as a "gap" is a rule on band energy, onsets and phrase position, not a musical judgement; not listened to by a human.
 
 ## Process
 19. ASan + UBSan + LeakSanitizer were run over the test runner (clean); no TSan, and no sanitizer pass over the plug-in binary or GUI. Threading is covered by a concurrent-edit stress test and the allocation-free `processBlock` test.

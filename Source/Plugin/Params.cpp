@@ -64,7 +64,7 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout(bool isFx)
         g->addChild(choice(scale, "Scale", scales, 1));
         l.add(std::move(g)); }
     {   auto g = std::make_unique<AudioProcessorParameterGroup>("seq", "Sequence", "|");
-        g->addChild(boolean(seqOn, "Sequencer", true));
+        g->addChild(boolean(seqOn, "Sequencer", false));
         StringArray modes; for (int i = 0; i < (int) SeqMode::Count; ++i) modes.add(seqModeName((SeqMode) i));
         g->addChild(choice(seqMode, "Mode", modes, 0));
         g->addChild(integer(seqBars, "Bars", 1, 32, 4));
@@ -81,6 +81,7 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout(bool isFx)
         g->addChild(pct(seqEvolve, "Evolve", 35));
         g->addChild(boolean(seqFreeze, "Freeze Pattern", false));
         g->addChild(boolean(seqFreeRun, "Free Run", false));
+        g->addChild(pct(variety, "Variety", 60));
         l.add(std::move(g)); }
     {   auto g = std::make_unique<AudioProcessorParameterGroup>("mod", "Macros", "|");
         g->addChild(pct(macro1, "Macro 1", 50), pct(macro2, "Macro 2", 50), pct(macro3, "Macro 3", 50), pct(macro4, "Macro 4", 50));

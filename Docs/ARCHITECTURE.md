@@ -14,6 +14,7 @@
 Gain staging: generator targets about -6 dBFS peak (rejects sounds that would need more than +12 dB master + 6 dB layer gain).
 
 ## Sequencer
+`ContextBuilder` (`buildContextEvents`) turns the track analysis suggestions into events over a palette of the eight plates (band/duration/role per plate): placement cost = band masking + room until the next hit + role fit, softmax choice with variety penalties, busy steps nudged +-3 or dropped, transition events before section changes. `CandyProcessor::buildPattern` drives it; generating plates replaces all eight sound slots.
 `planEvents` (8 modes) produces events in beats from loop start. `SeqPlayer::render` derives the window from host PPQ with continuity tracking, so each event fires exactly once for any block size, tempo change or loop. Probability and live-omit decisions are hashes of (event, loop index).
 
 ## Files

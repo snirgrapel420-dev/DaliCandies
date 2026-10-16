@@ -165,7 +165,7 @@ DTEST(sequencer_is_host_synced_and_block_size_independent)
     // stopped transport -> silence (free run off)
     CandyProcessor p(false); prepare(p, 48000.0, 512); TestPlayHead ph; ph.playing = false; auto r = run(p, 24000, 512, {}, &ph); CHECK(r.peak == 0.0f);
     // free run produces sound without a host transport
-    CandyProcessor q(false); setP(q, pid::seqFreeRun, 1); setP(q, pid::seqMode, 5); setP(q, pid::euHits, 8); prepare(q, 48000.0, 512); auto fr = run(q, 48000 * 2, 512); CHECK(fr.peak > 0.02f);
+    CandyProcessor q(false); setP(q, pid::seqOn, 1); setP(q, pid::seqFreeRun, 1); setP(q, pid::seqMode, 5); setP(q, pid::euHits, 8); prepare(q, 48000.0, 512); q.regeneratePattern(false); auto fr = run(q, 48000 * 2, 512); CHECK(fr.peak > 0.02f);
 }
 
 DTEST(fx_dry_wet_sidechain_and_passthrough)
@@ -460,4 +460,52 @@ DTEST(listen_aims_generation_at_the_quietest_band_of_the_track)
     const auto a = p.analysis(); for (int b = 3; b <= 6; ++b) CHECK(a->bandDb[(size_t) gap] <= a->bandDb[(size_t) b] + 1e-4f);
     setP(p, pid::listenOn, 0); CHECK(std::abs(p.kitchenSettings().brightness - 0.5f) < 1e-3f);        // steering only while LISTEN is on
     CHECK(std::abs(gs.brightness - 0.5f) > 0.02f || gap == 4);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// Context: nothing plays without a built pattern; the plates are the palette; the pattern uses them and the track's gaps
+// ---------------------------------------------------------------------------------------------------------------------------
+DTEST(fresh_plugin_is_silent_on_play_until_a_pattern_is_built)
+{
+    setupEnv();
+    for (bool fx : { false, true })
+    {
+        CandyProcessor p(fx); prepare(p, 48000.0, 512);
+        CHECK(getP(p, pid::seqOn) < 0.5f);
+        TestPlayHead ph; ph.bpm = 120.0;
+        auto r = run(p, 48000 * 8, 512, {}, &ph);                      // 4 bars of host playback, no MIDI, no audio input
+        CHECK_MSG(r.peak < 1e-6f, std::string(fx ? "fx" : "instrument") + " made sound on Play: " + std::to_string(r.peak));
+        p.loadPreset(p.presets().entries().empty() ? p.presetSnapshot() : [&] { Preset q; p.presets().load(5, q); return q; }());
+        CHECK(getP(p, pid::seqOn) < 0.5f);                              // loading a preset does not start the sequencer either
+    }
+}
+
+DTEST(plates_become_the_palette_and_the_pattern_uses_them_in_the_gaps_of_the_track)
+{
+    setupEnv();
+    CandyProcessor p(true); setP(p, pid::seqOn, 0); prepare(p, 44100.0, 512);
+    // an analysed track: kick on every beat, hats in the first two bars
+    const double sr = 44100.0; const int N = (int) (4 * 4 * 0.5 * sr); std::vector<float> x((size_t) N, 0.0f); juce::Random rnd(4);
+    for (int b = 0; b < 16; ++b) { const int k = (int) (b * 0.5 * sr); for (int i = 0; i < 6000 && k + i < N; ++i) x[(size_t) (k + i)] += 0.8f * std::sin(6.28318f * 55.0f * (float) i / (float) sr) * std::exp(-(float) i / 1500.0f); }
+    for (int s = 0; s < 32; ++s) { const int h = (int) (s * 0.125 * sr); for (int i = 0; i < 2000 && h + i < N; ++i) x[(size_t) (h + i)] += 0.3f * (rnd.nextFloat() * 2 - 1) * std::exp(-(float) i / 500.0f); }
+    juce::TemporaryFile tf(".wav"); juce::AudioBuffer<float> wb(1, N); for (int i = 0; i < N; ++i) wb.setSample(0, i, x[(size_t) i]);
+    CHECK(Exporter::writeWav(tf.getFile(), wb, sr, 16, true)); setP(p, pid::anaBpm, 120.0f);
+    p.importAudioFile(tf.getFile()); CHECK(waitFor([&] { return p.analysis() != nullptr && ! p.busy(); }, 60000));
+    setP(p, pid::famA, 2); setP(p, pid::famB, 6); setP(p, pid::variety, 80);
+    p.generate(); CHECK(waitFor([&] { return p.candidates().size() >= 8 && ! p.busy(); }));
+    const auto cands = p.candidates(); const auto snap = p.presetSnapshot();
+    for (size_t i = 0; i < 8; ++i) CHECK(snap.slotUsed[i] && snap.slots[i].id == cands[i].dna.id);           // the eight plates ARE the eight slots
+    p.selectCandidate(3); CHECK(p.mainSlot() == 3);
+    { auto s2 = p.presetSnapshot(); for (size_t i = 0; i < 8; ++i) CHECK(s2.slotUsed[i] && s2.slots[i].id == cands[i].dna.id); }      // choosing one does not wipe the others
+    p.buildPattern(true);
+    waitFor([&] { auto pt = p.pattern(); return pt && pt->events.size() >= 5; }, 3000);
+    CHECK(p.pattern()->events.size() >= 5);
+    CHECK(getP(p, pid::seqOn) > 0.5f);
+    auto pat = p.pattern(); std::set<int> slots; int onHit = 0;
+    auto a = p.analysis();
+    for (auto& e : pat->events) { slots.insert(e.slot); const int st = (int) std::lround(e.position / 0.25); if (st < a->numSteps && a->onset[(size_t) st] >= 0.45f) ++onHit; CHECK(e.slot >= 0 && e.slot < 8); }
+    CHECK_MSG(slots.size() >= 3, "sounds used by the pattern: " + std::to_string(slots.size()));
+    CHECK_MSG(onHit == 0, "events on top of hits: " + std::to_string(onHit));
+    // and it really plays: transport running, no MIDI -> audible, and different events differ
+    TestPlayHead ph; ph.bpm = 120.0; auto r = run(p, 44100 * 8, 512, {}, &ph); CHECK(r.finite && r.peak > 0.02f);
 }

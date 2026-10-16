@@ -97,7 +97,9 @@ public:
     void generate();                                         // fresh dishes (or variations of the current one when Keep Skeleton is on)
     void roll();                                             // ignores the family choice: random family / fusion / settings, then picks one at random
     void rollWith(uint32_t seed);
-    void listen();                                           // capture the track, analyse it, place events in its gaps and aim a new generation at them
+    void listen();
+    void platesToPalette();                                  // the candidate plates become the sound slots the sequence plays from
+    void buildPattern(bool newSeed);                         // context-aware pattern from the analysed track (rhythm-only plan when nothing is analysed)                                           // capture the track, analyse it, place events in its gaps and aim a new generation at them
     void cancelWork();
     bool busy() const { return busyJobs_.load() > 0; }
     float progress() const { return progress_.load(); }
@@ -209,7 +211,7 @@ private:
     juce::ThreadPool pool_ { juce::ThreadPoolOptions {}.withNumberOfThreads(1).withThreadName("DaliCandy worker") };
     TempExportFiles dragFiles_;
     std::atomic<bool> alive_ { true }; std::atomic<uint32_t> uiFlags_ { 0 };
-    std::atomic<double> hostBpm_ { 120.0 }; std::atomic<bool> rollPending_ { false }, listenPending_ { false }; uint32_t rollPick_ = 0;
+    std::atomic<double> hostBpm_ { 120.0 }; std::atomic<bool> rollPending_ { false }, listenPending_ { false }, buildAfterCook_ { false }; uint32_t rollPick_ = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CandyProcessor)
 };

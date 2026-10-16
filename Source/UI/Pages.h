@@ -1,5 +1,6 @@
 #pragma once
 #include "Widgets.h"
+#include <set>
 
 namespace dali::ui
 {
@@ -58,8 +59,8 @@ private:
     juce::String dishTitle() const;
 
     FlavorMatrix matrix { *this };
-    juce::TextButton roll { "ROLL" }, cook { "COOK" }, listen { "LISTEN" }, octDown { "<" }, octUp { ">" };
-    std::unique_ptr<ParamToggle> keep;
+    juce::TextButton roll { "ROLL" }, cook { "COOK" }, listen { "LISTEN" }, buildBtn { "BUILD" }, octDown { "<" }, octUp { ">" };
+    std::unique_ptr<ParamToggle> keep, playSeq;
     std::unique_ptr<ParamKnob> spiceKnob, driftKnob, brightKnob, motionKnob; std::unique_ptr<ParamCombo> lenBox;
     TitledPanel pMatrix { "FLAVOUR MATRIX", col::magenta }, pDish { "THE DISH", col::turquoise }, pPlates { "EIGHT PLATES", col::purple }, pKnobs { "SEASONING", col::magenta };
     WaveView dishWave; DragPad dragWav { *this, false }, dragMidi { *this, true }; Keys keys;
@@ -107,12 +108,17 @@ private:
     {
         explicit PatternView(SequencePage& o) : owner(o) {}
         void paint(juce::Graphics&) override; void mouseDown(const juce::MouseEvent&) override;
-        SequencePage& owner; std::shared_ptr<const SeqPattern> pat; double playhead = 0; bool playing = false;
+        SequencePage& owner; std::shared_ptr<const SeqPattern> pat; std::shared_ptr<const TrackAnalysis> ana; double playhead = 0; bool playing = false;
     };
-    TitledPanel pPattern { "Pattern", col::turquoise }, pMain { "Generator", col::magenta }, pFeel { "Feel & variation", col::purple }, pEuclid { "Euclidean & evolution", col::turquoise }, pExport { "Export & drag", col::magenta };
+    // Simple controls on top; the full toolbox sits under MORE CONTROLS
+    TitledPanel pSimple { "Fill the gaps of your track", col::magenta }, pPattern { "Pattern  -  grey = what your track does, colours = your eight plates", col::turquoise };
+    TitledPanel pMain { "Generator", col::magenta }, pFeel { "Feel & variation", col::purple }, pEuclid { "Euclidean & evolution", col::turquoise }, pExport { "Export & drag", col::magenta };
     std::vector<std::unique_ptr<ParamKnob>> knobs; std::vector<std::unique_ptr<ParamCombo>> combos; std::vector<std::unique_ptr<ParamToggle>> toggles;
+    std::vector<std::unique_ptr<ParamKnob>> topKnobs; std::unique_ptr<ParamToggle> playTop, freeTop;
+    juce::TextButton build { "BUILD FOR THIS TRACK" }, variation { "NEW VARIATION" }, listenBtn { "LISTEN" }, moreBtn { "MORE CONTROLS" };
     juce::TextButton regenerate { "New pattern" }, evolveBtn { "Evolve phrase" }, applyBtn { "Rebuild (keep frozen)" };
-    PatternView view { *this }; ExportBar exportBar; juce::Label info;
+    bool showMore = false;
+    PatternView view { *this }; ExportBar exportBar; juce::Label info, help;
     ParamKnob* knob(const char* id, const juce::String& cap, juce::Colour c = col::magenta, juce::Component* parent = nullptr);
     ParamCombo* combo(const char* id, const juce::String& cap, juce::Component* parent);
     ParamToggle* toggle(const char* id, const juce::String& t, juce::Component* parent);
