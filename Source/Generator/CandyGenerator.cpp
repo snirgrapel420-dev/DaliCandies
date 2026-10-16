@@ -1,6 +1,7 @@
 #include "CandyGenerator.h"
 #include "DSP/Modulation/ModEngine.h"
 #include <algorithm>
+#include <bit>
 #include <numeric>
 
 namespace dali
@@ -78,7 +79,7 @@ float CandyGenerator::distance(const CandyDNA& a, const CandyDNA& b)
     const float cent = std::min(1.0f, std::abs(std::log2(std::max(50.0f, a.spectral.centroidHz) / std::max(50.0f, b.spectral.centroidHz))) / 3.0f);
     const float dur = std::min(1.0f, std::abs(std::log2(std::max(10.0f, a.durationMs) / std::max(10.0f, b.durationMs))) / 3.0f);
     int ea = 0, eb = 0; for (auto& l : a.layers) if (l.active) ea |= 1 << (int) l.engine; for (auto& l : b.layers) if (l.active) eb |= 1 << (int) l.engine;
-    const int inter = __builtin_popcount(ea & eb), uni = __builtin_popcount(ea | eb);
+    const int inter = std::popcount((unsigned) (ea & eb)), uni = std::popcount((unsigned) (ea | eb));
     const float eng = uni ? 1.0f - (float) inter / (float) uni : 0.0f;
     const float arch = (a.category == b.category && a.archetype == b.archetype) ? 0.0f : 1.0f;
     const float mot = std::min(1.0f, std::abs(a.motion.stereoMotion - b.motion.stereoMotion) * 2.0f);
