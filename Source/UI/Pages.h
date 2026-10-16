@@ -59,6 +59,7 @@ private:
     juce::String dishTitle() const;
 
     FlavorMatrix matrix { *this };
+    juce::Label inputLbl; std::unique_ptr<juce::FileChooser> listenChooser;
     juce::TextButton roll { "ROLL" }, cook { "COOK" }, listen { "LISTEN" }, buildBtn { "BUILD" }, octDown { "<" }, octUp { ">" };
     std::unique_ptr<ParamToggle> keep, playSeq;
     std::unique_ptr<ParamKnob> spiceKnob, driftKnob, brightKnob, motionKnob; std::unique_ptr<ParamCombo> lenBox;

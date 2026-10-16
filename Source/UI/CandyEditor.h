@@ -4,10 +4,12 @@
 
 namespace dali::ui
 {
-class CandyEditor : public juce::AudioProcessorEditor, public juce::DragAndDropContainer, private juce::Timer
+class CandyEditor : public juce::AudioProcessorEditor, public juce::DragAndDropContainer, public juce::FileDragAndDropTarget, private juce::Timer
 {
 public:
     explicit CandyEditor(CandyProcessor&);
+    bool isInterestedInFileDrag(const juce::StringArray& f) override { for (auto& s : f) if (juce::File(s).hasFileExtension("wav;aif;aiff;flac;ogg")) return true; return false; }
+    void filesDropped(const juce::StringArray& f, int, int) override { for (auto& s : f) if (juce::File(s).hasFileExtension("wav;aif;aiff;flac;ogg")) { proc.listenFromFile(juce::File(s)); return; } }
     ~CandyEditor() override;
     void paint(juce::Graphics&) override;
     void resized() override;

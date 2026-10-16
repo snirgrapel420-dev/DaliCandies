@@ -97,7 +97,11 @@ public:
     void generate();                                         // fresh dishes (or variations of the current one when Keep Skeleton is on)
     void roll();                                             // ignores the family choice: random family / fusion / settings, then picks one at random
     void rollWith(uint32_t seed);
-    void listen();
+    void listen();                                           // analyse what the plug-in has been hearing (no arming); no audio -> asks for a WAV
+    void listenFromFile(const juce::File& f);                // LISTEN with a bounced track: analyse, cook plates for its gaps, build the pattern
+    bool takeListenNeedsFile() { return listenNeedsFile_.exchange(false); }
+    float inputLevel() const { return inputLevel_.load(std::memory_order_relaxed); }   // 0..1 peak of the audio reaching the plug-in
+    double heardSeconds() const { return sr_ > 0 ? (double) std::min<int64_t>(ringWritten_.load(), (int64_t) ring_.size()) / sr_ : 0.0; }
     void platesToPalette();                                  // the candidate plates become the sound slots the sequence plays from
     void buildPattern(bool newSeed);                         // context-aware pattern from the analysed track (rhythm-only plan when nothing is analysed)                                           // capture the track, analyse it, place events in its gaps and aim a new generation at them
     void cancelWork();
@@ -212,6 +216,7 @@ private:
     TempExportFiles dragFiles_;
     std::atomic<bool> alive_ { true }; std::atomic<uint32_t> uiFlags_ { 0 };
     std::atomic<double> hostBpm_ { 120.0 }; std::atomic<bool> rollPending_ { false }, listenPending_ { false }, buildAfterCook_ { false }; uint32_t rollPick_ = 0; int lastListenPct_ = -2;
+    std::vector<float> ring_; std::atomic<int64_t> ringWritten_ { 0 }; std::atomic<double> ringEndPpq_ { -1.0 }, ringBpm_ { 120.0 }; std::atomic<float> inputLevel_ { 0.0f }; std::atomic<bool> listenNeedsFile_ { false }, hostBpmKnown_ { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CandyProcessor)
 };

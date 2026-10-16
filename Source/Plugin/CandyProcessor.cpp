@@ -93,6 +93,7 @@ void CandyProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     live_.prepare(sr_); live_.reset();
     candyL_.assign((size_t) maxBlock_, 0.0f); candyR_.assign((size_t) maxBlock_, 0.0f);
     scL_.assign((size_t) maxBlock_, 0.0f); scR_.assign((size_t) maxBlock_, 0.0f);
+    ring_.assign((size_t) (sr_ * 90.0), 0.0f); ringWritten_ = 0; ringEndPpq_ = -1.0; inputLevel_ = 0.0f;
     freePpq_ = 0.0; wasPlaying_ = false; seq_.resetPosition();
     lastWet_ = apvts.getRawParameterValue(pid::wet)->load() * 0.01f; lastGain_ = dbToGain(apvts.getRawParameterValue(pid::outGain)->load());
     lastDry_ = isFx_ ? apvts.getRawParameterValue(pid::dry)->load() * 0.01f : 0.0f;
@@ -131,7 +132,7 @@ void CandyProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
     if (auto* ph = getPlayHead())
         if (auto pos = ph->getPosition())
         {
-            if (auto b = pos->getBpm()) bpm = juce::jlimit(20.0, 400.0, *b);
+            if (auto b = pos->getBpm()) { bpm = juce::jlimit(20.0, 400.0, *b); hostBpmKnown_.store(true, std::memory_order_relaxed); }
             if (auto p = pos->getPpqPosition()) { host.ppq = *p; hostPpq = true; }
             hostPlaying = pos->getIsPlaying();
         }
@@ -145,6 +146,21 @@ void CandyProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
     if (host.playing && ! wasPlaying_) seq_.resetPosition();
     wasPlaying_ = host.playing;
     const double beatsPerSample = bpm / 60.0 / sr_;
+
+    // ---- always-on listening: the last ~90 s of what reaches the input (only while the transport runs) ---------------------
+    if (aL != nullptr && ! ring_.empty())
+    {
+        float pk = 0.0f; for (int i = 0; i < n; ++i) pk = std::max(pk, std::abs(0.5f * (aL[i] + aR[i])));
+        inputLevel_.store(std::max(pk, inputLevel_.load(std::memory_order_relaxed) * 0.93f), std::memory_order_relaxed);
+        if (! hostPpq || hostPlaying)
+        {
+            const int64_t rs = (int64_t) ring_.size(); int64_t w = ringWritten_.load(std::memory_order_relaxed);
+            for (int i = 0; i < n; ++i) ring_[(size_t) ((w + i) % rs)] = 0.5f * (aL[i] + aR[i]);
+            ringBpm_.store(bpm, std::memory_order_relaxed); ringEndPpq_.store(hostPpq ? host.ppq + (double) n * beatsPerSample : -1.0, std::memory_order_relaxed);
+            ringWritten_.store(w + n, std::memory_order_release);
+        }
+    }
+    else inputLevel_.store(inputLevel_.load(std::memory_order_relaxed) * 0.93f, std::memory_order_relaxed);
     uiPlayhead_.store(host.ppq, std::memory_order_relaxed); uiPlaying_.store(host.playing, std::memory_order_relaxed);
 
     // ---- capture (FX: records the analysis source, aligned to the next bar line) ------------------------------------------
@@ -624,14 +640,37 @@ void CandyProcessor::rollWith(uint32_t seed)
 
 void CandyProcessor::listen()
 {
-    if (getTotalNumInputChannels() == 0)
-    {
-        { const juce::ScopedLock sl(lock_); status_ = "LISTEN needs an audio input. Use DaliCandy as an effect on the track, or Import WAV in Track analysis."; }
-        flagChange(kChStatus); return;
+    auto say = [this](const juce::String& s) { { const juce::ScopedLock sl(lock_); status_ = s; } flagChange(kChStatus); };
+    const int64_t written = ringWritten_.load(std::memory_order_acquire);
+    const int64_t rs = (int64_t) ring_.size();
+    const double bpm = std::max(20.0, ringBpm_.load()); const double bpb = 4.0;
+    const int barsChoice[] = { 4, 8, 16, 32 };
+    const int wantBars = barsChoice[std::clamp((int) apvts.getRawParameterValue(pid::capBars)->load(), 0, 3)];
+    const double spBar = bpb * 60.0 / bpm * sr_;
+    if (written < (int64_t) (2.0 * spBar))
+    {   // the plug-in has not heard enough: typical for an instrument track, where the host gives no audio
+        setParam(apvts, pid::listenOn, 1.0f); listenPending_ = true; listenNeedsFile_ = true;
+        say("No track audio reaches the plug-in (an instrument track gets none), so choose the track as a WAV file...");
+        return;
     }
-    setParam(apvts, pid::listenOn, 1.0f);
-    listenPending_ = true; lastListenPct_ = -2;
-    startCapture();
+    const double endPpq = ringEndPpq_.load();
+    int64_t end = written; if (endPpq >= 0.0) end -= (int64_t) std::llround(std::fmod(endPpq, bpb) * 60.0 / bpm * sr_);      // stop on the last bar line
+    const int heardBars = (int) std::floor((double) std::min<int64_t>(end, rs) / spBar);
+    const int useBars = std::min(wantBars, heardBars);
+    if (useBars < 2) { say("Heard only " + juce::String(heardBars) + " bar(s) so far: let the track play a few more bars, then press LISTEN again"); return; }
+    const int64_t len = (int64_t) std::llround((double) useBars * spBar);
+    std::vector<float> mono((size_t) len); float peak = 0.0f;
+    for (int64_t i = 0; i < len; ++i) { const float v = ring_[(size_t) (((end - len + i) % rs + rs) % rs)]; mono[(size_t) i] = v; peak = std::max(peak, std::abs(v)); }
+    if (peak < 0.003f) { say("LISTEN heard silence: the track audio is not reaching the plug-in. Use DaliCandy as an effect on the track, or drop a WAV of the track onto this window"); return; }
+    setParam(apvts, pid::listenOn, 1.0f); listenPending_ = true;
+    beginAnalysis(std::move(mono), sr_, bpm, 4);
+}
+
+void CandyProcessor::listenFromFile(const juce::File& f)
+{
+    setParam(apvts, pid::listenOn, 1.0f); listenPending_ = true;
+    if (hostBpmKnown_.load()) setParam(apvts, pid::anaBpm, (float) hostBpm_.load());
+    importAudioFile(f);
 }
 
 void CandyProcessor::platesToPalette()

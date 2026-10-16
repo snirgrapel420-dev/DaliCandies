@@ -443,15 +443,16 @@ DTEST(listen_aims_generation_at_the_quietest_band_of_the_track)
     CandyProcessor p(true); setP(p, pid::capBars, 0); setP(p, pid::seqOn, 0); prepare(p, 44100.0, 512);
     const double sr = 44100.0; const int N = (int) (4 * 4 * 0.5 * sr); std::vector<float> x((size_t) N, 0.0f);
     for (int b = 0; b < 16; ++b) { const int k = (int) (b * 0.5 * sr); for (int i = 0; i < 6000 && k + i < N; ++i) x[(size_t) (k + i)] += 0.8f * std::sin(6.28318f * 55.0f * (float) i / (float) sr) * std::exp(-(float) i / 1500.0f); }
-    p.listen(); CHECK(p.captureState() == 1); CHECK(getP(p, pid::listenOn) > 0.5f);
+    // the track plays through the plug-in for a few bars first; LISTEN then analyses what was heard (no arming, no waiting)
     TestPlayHead ph; ph.bpm = 120.0; juce::AudioBuffer<float> buf(2, 512); juce::MidiBuffer midi; p.setPlayHead(&ph);
-    int pos = 0, guard = 0;
-    while (p.captureState() != 3 && guard++ < 2000)
+    for (int blk = 0, pos = 0; blk < 1500; ++blk, pos += 512)
     {
-        for (int i = 0; i < 512; ++i) { const float v = pos + i < N ? x[(size_t) (pos + i)] : 0.0f; buf.setSample(0, i, v); buf.setSample(1, i, v); }
-        ph.ppq = (double) pos / sr * 2.0; p.processBlock(buf, midi); pos += 512;
+        for (int i = 0; i < 512; ++i) { const float v = x[(size_t) ((pos + i) % N)]; buf.setSample(0, i, v); buf.setSample(1, i, v); }
+        ph.ppq = (double) pos / sr * 2.0; p.processBlock(buf, midi);
     }
     p.setPlayHead(nullptr);
+    CHECK(p.inputLevel() >= 0.0f); CHECK(p.heardSeconds() > 10.0);
+    p.listen(); CHECK(getP(p, pid::listenOn) > 0.5f); CHECK(! p.takeListenNeedsFile());
     CHECK(waitFor([&] { return p.analysis() != nullptr; }));
     // LISTEN placed events by itself and started a generation
     CHECK(waitFor([&] { auto pt = p.pattern(); return pt && ! pt->events.empty() && p.candidates().size() >= 5; }));
@@ -510,31 +511,21 @@ DTEST(plates_become_the_palette_and_the_pattern_uses_them_in_the_gaps_of_the_tra
     TestPlayHead ph; ph.bpm = 120.0; auto r = run(p, 44100 * 8, 512, {}, &ph); CHECK(r.finite && r.peak > 0.02f);
 }
 
-DTEST(listen_waits_for_play_and_never_analyses_silence)
+DTEST(listen_without_audio_asks_for_a_wav_and_silence_is_never_analysed)
 {
     setupEnv();
+    // nothing has reached the plug-in (instrument track): LISTEN must say so and ask for a file instead of waiting forever
+    { CandyProcessor p(true); prepare(p, 44100.0, 512); p.listen(); CHECK(p.takeListenNeedsFile()); CHECK(p.statusText().contains("WAV")); }
+    // the host plays but the input is silent: reported, nothing built
     CandyProcessor p(true); setP(p, pid::capBars, 0); prepare(p, 44100.0, 512);
-    juce::AudioBuffer<float> buf(2, 512); juce::MidiBuffer midi; TestPlayHead ph; ph.bpm = 120.0; ph.playing = false; p.setPlayHead(&ph);
-    p.listen(); CHECK(p.captureState() == 1);
-    // host stopped: stays armed, records nothing (used to record silence and then fill everything)
-    for (int i = 0; i < 100; ++i) { buf.clear(); p.processBlock(buf, midi); }
-    CHECK(p.captureState() == 1);
-    CHECK(p.statusText().contains("press Play") || p.statusText().contains("armed") || p.statusText().contains("Armed"));
-    // host plays but the input is silent: finishes, reports silence, builds nothing
-    ph.playing = true; int pos = 0, guard = 0;
-    while (p.captureState() != 3 && guard++ < 3000) { buf.clear(); ph.ppq = (double) pos / 44100.0 * 2.0; p.processBlock(buf, midi); pos += 512; }
+    juce::AudioBuffer<float> buf(2, 512); juce::MidiBuffer midi; TestPlayHead ph; ph.bpm = 120.0; p.setPlayHead(&ph);
+    for (int blk = 0, pos = 0; blk < 1200; ++blk, pos += 512) { buf.clear(); ph.ppq = (double) pos / 44100.0 * 2.0; p.processBlock(buf, midi); }
     p.setPlayHead(nullptr);
-    CHECK(p.captureState() == 3);
-    CHECK_MSG(waitFor([&] { return p.statusText().contains("silence"); }, 5000), p.statusText().toStdString());
-    CHECK(p.analysis() == nullptr || ! p.analysis()->valid);
-    CHECK(getP(p, pid::seqOn) < 0.5f);
-}
-
-DTEST(listen_on_an_instrument_without_input_says_so)
-{
-    setupEnv();
-    CandyProcessor p(false); prepare(p, 44100.0, 512);
-    if (p.getTotalNumInputChannels() == 0) { p.listen(); CHECK(p.captureState() == 0); CHECK(p.statusText().contains("audio input")); }
+    p.listen(); CHECK(p.statusText().contains("silence")); CHECK(p.analysis() == nullptr || ! p.analysis()->valid); CHECK(getP(p, pid::seqOn) < 0.5f);
+    // a stopped host records nothing at all
+    CandyProcessor q(true); prepare(q, 44100.0, 512); TestPlayHead st; st.playing = false; q.setPlayHead(&st);
+    for (int blk = 0; blk < 400; ++blk) { for (int c = 0; c < 2; ++c) for (int i = 0; i < 512; ++i) buf.setSample(c, i, 0.3f); q.processBlock(buf, midi); }
+    q.setPlayHead(nullptr); CHECK(q.heardSeconds() == 0.0);
 }
 
 DTEST(a_full_track_gets_no_fill)
@@ -554,4 +545,19 @@ DTEST(a_full_track_gets_no_fill)
     CHECK(a && a->valid);
     const int bars = a ? a->bars : 4;
     CHECK_MSG(a && (int) a->suggestions.size() <= bars, "fill suggestions on a full track: " + std::to_string(a ? a->suggestions.size() : 0));
+}
+
+DTEST(listen_from_a_wav_file_analyses_cooks_and_builds_the_pattern)
+{
+    setupEnv();
+    const double sr = 44100.0; const int N = (int) (8 * 4 * 0.5 * sr); juce::AudioBuffer<float> wav(2, N);
+    for (int b = 0; b < 32; ++b) { const int k = (int) (b * 0.5 * sr); for (int i = 0; i < 6000 && k + i < N; ++i) { const float v = 0.8f * std::sin(6.28318f * 55.0f * (float) i / (float) sr) * std::exp(-(float) i / 1500.0f); wav.setSample(0, k + i, v); wav.setSample(1, k + i, v); } }
+    auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("dali_listen_wav"); dir.createDirectory(); auto f = dir.getChildFile("track.wav");
+    { juce::WavAudioFormat fmt; std::unique_ptr<juce::FileOutputStream> os(f.createOutputStream()); std::unique_ptr<juce::AudioFormatWriter> w(fmt.createWriterFor(os.get(), sr, 2, 24, {}, 0)); if (w) { os.release(); w->writeFromAudioSampleBuffer(wav, 0, N); } }
+    CHECK(f.existsAsFile());
+    CandyProcessor p(false); prepare(p, 44100.0, 512); setP(p, pid::seqOn, 0);
+    p.listenFromFile(f);
+    CHECK(waitFor([&] { auto a = p.analysis(); auto pt = p.pattern(); return a && a->valid && pt && ! pt->events.empty() && p.candidates().size() >= 5; }));
+    CHECK(getP(p, pid::seqOn) > 0.5f);
+    dir.deleteRecursively();
 }
