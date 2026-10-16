@@ -38,6 +38,7 @@
 24. The on-screen keyboard, flavour matrix, drag pads and plates were exercised only headlessly (snapshots, smoke test); no human has clicked them in a real host.
 25. The sequencer starts OFF and presets never switch it on (this removed the constant sound on Play). Generating plates overwrites all eight sound slots (MIDI channels 1-8 play the plates).
 26. Context placement does not detect the key of the track: pitch follows the user's Root/Scale setting. Events are dropped where no free step exists within +-3 steps, so dense tracks get fewer events. What counts as a "gap" is a rule on band energy, onsets and phrase position, not a musical judgement; not listened to by a human.
+27. LISTEN waits for the host transport (Play) and the next bar line, records the chosen number of bars (default 8) and then analyses; a silent input is reported and nothing is built. Fills are only suggested where the step scores at least 0.55 opportunity, so a full track can get none ("nothing was added"). The 0.55 threshold is a tuned guess, not verified on real music.
 
 ## Process
 19. ASan + UBSan + LeakSanitizer were run over the test runner (clean); no TSan, and no sanitizer pass over the plug-in binary or GUI. Threading is covered by a concurrent-edit stress test and the allocation-free `processBlock` test.

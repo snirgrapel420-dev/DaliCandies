@@ -509,3 +509,49 @@ DTEST(plates_become_the_palette_and_the_pattern_uses_them_in_the_gaps_of_the_tra
     // and it really plays: transport running, no MIDI -> audible, and different events differ
     TestPlayHead ph; ph.bpm = 120.0; auto r = run(p, 44100 * 8, 512, {}, &ph); CHECK(r.finite && r.peak > 0.02f);
 }
+
+DTEST(listen_waits_for_play_and_never_analyses_silence)
+{
+    setupEnv();
+    CandyProcessor p(true); setP(p, pid::capBars, 0); prepare(p, 44100.0, 512);
+    juce::AudioBuffer<float> buf(2, 512); juce::MidiBuffer midi; TestPlayHead ph; ph.bpm = 120.0; ph.playing = false; p.setPlayHead(&ph);
+    p.listen(); CHECK(p.captureState() == 1);
+    // host stopped: stays armed, records nothing (used to record silence and then fill everything)
+    for (int i = 0; i < 100; ++i) { buf.clear(); p.processBlock(buf, midi); }
+    CHECK(p.captureState() == 1);
+    CHECK(p.statusText().contains("press Play") || p.statusText().contains("armed") || p.statusText().contains("Armed"));
+    // host plays but the input is silent: finishes, reports silence, builds nothing
+    ph.playing = true; int pos = 0, guard = 0;
+    while (p.captureState() != 3 && guard++ < 3000) { buf.clear(); ph.ppq = (double) pos / 44100.0 * 2.0; p.processBlock(buf, midi); pos += 512; }
+    p.setPlayHead(nullptr);
+    CHECK(p.captureState() == 3);
+    CHECK_MSG(waitFor([&] { return p.statusText().contains("silence"); }, 5000), p.statusText().toStdString());
+    CHECK(p.analysis() == nullptr || ! p.analysis()->valid);
+    CHECK(getP(p, pid::seqOn) < 0.5f);
+}
+
+DTEST(listen_on_an_instrument_without_input_says_so)
+{
+    setupEnv();
+    CandyProcessor p(false); prepare(p, 44100.0, 512);
+    if (p.getTotalNumInputChannels() == 0) { p.listen(); CHECK(p.captureState() == 0); CHECK(p.statusText().contains("audio input")); }
+}
+
+DTEST(a_full_track_gets_no_fill)
+{
+    setupEnv();
+    CandyProcessor p(true); setP(p, pid::capBars, 0); prepare(p, 44100.0, 512);
+    // dense, loud, broadband material on every 1/16 step: no real gap
+    const double sr = 44100.0; const int N = (int) (4 * 4 * 0.5 * sr); std::vector<float> x((size_t) N); juce::Random rnd(7);
+    const int stepN = (int) (sr * 0.125);
+    for (int i = 0; i < N; ++i) { const int ph = i % stepN; x[(size_t) i] = 0.6f * (rnd.nextFloat() * 2 - 1) * std::exp(-(float) ph / (float) (stepN * 0.9)) + 0.25f * std::sin(6.28318f * 220.0f * (float) i / (float) sr); }
+    p.startCapture(); TestPlayHead ph; ph.bpm = 120.0; juce::AudioBuffer<float> buf(2, 512); juce::MidiBuffer midi; p.setPlayHead(&ph);
+    int pos = 0, guard = 0;
+    while (p.captureState() != 3 && guard++ < 2000)
+    { for (int i = 0; i < 512; ++i) { const float v = pos + i < N ? x[(size_t) (pos + i)] : 0.0f; buf.setSample(0, i, v); buf.setSample(1, i, v); } ph.ppq = (double) pos / sr * 2.0; p.processBlock(buf, midi); pos += 512; }
+    p.setPlayHead(nullptr);
+    CHECK(waitFor([&] { return p.analysis() != nullptr; })); auto a = p.analysis();
+    CHECK(a && a->valid);
+    const int bars = a ? a->bars : 4;
+    CHECK_MSG(a && (int) a->suggestions.size() <= bars, "fill suggestions on a full track: " + std::to_string(a ? a->suggestions.size() : 0));
+}

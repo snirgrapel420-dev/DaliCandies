@@ -153,7 +153,8 @@ void CandyProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
         int st = cap->state.load(std::memory_order_relaxed); int startAt = 0;
         if (st == 1)
         {
-            if (! useHost) { st = 2; cap->state.store(2); cap->written.store(0); }
+            if (hostPpq && ! hostPlaying) { /* armed: wait until the host transport runs, otherwise we would record silence */ }
+            else if (! useHost) { st = 2; cap->state.store(2); cap->written.store(0); }
             else
             {
                 const double bpb = (double) cap->beatsPerBar, inBar = std::fmod(host.ppq, bpb);
@@ -483,6 +484,20 @@ void CandyProcessor::handleAsyncUpdate()
     std::deque<MailItem> items;
     { const juce::ScopedLock sl(mailLock_); items.swap(mail_); }
     for (auto& it : items) if (alive_ && it.apply) it.apply();
+    if (auto cap = capture_; cap != nullptr && ! captureHandled_)
+    {
+        const int st = cap->state.load();
+        if (st == 1 || st == 2)
+        {
+            const int pct = st == 1 ? -1 : (int) (100.0f * (float) cap->written.load() / (float) std::max(1, cap->capacity)) / 5 * 5;
+            if (pct != lastListenPct_)
+            {
+                lastListenPct_ = pct;
+                { const juce::ScopedLock sl(lock_); status_ = st == 1 ? juce::String("LISTEN armed: press Play in the host (starts on the next bar line)...") : "Listening to the track... " + juce::String(pct) + "% (" + juce::String(cap->bars) + " bars)"; }
+                flagChange(kChStatus);
+            }
+        }
+    }
     if (pendingFlags_ != 0) { uiFlags_ |= pendingFlags_; sendChangeMessage(); }
 }
 
@@ -499,6 +514,14 @@ void CandyProcessor::timerCallback()
     {
         captureHandled_ = true; captureRaw_ = nullptr;
         std::vector<float> mono(cap->mono.begin(), cap->mono.begin() + cap->capacity);
+        float peak = 0.0f; for (float v : mono) peak = std::max(peak, std::abs(v));
+        if (peak < 0.003f)
+        {   // nothing came in: do not "analyse" silence (that would call every step a gap and fill all of it)
+            listenPending_ = false;
+            { const juce::ScopedLock sl(lock_); status_ = "LISTEN heard silence. Put DaliCandy as an effect on the track (audio input), press Play, or use Import WAV in Track analysis."; }
+            flagChange(kChStatus);
+        }
+        else
         beginAnalysis(std::move(mono), cap->sampleRate, cap->bpm, cap->beatsPerBar);
     }
     if (pendingFlags_ != 0) { uiFlags_ |= pendingFlags_; sendChangeMessage(); pendingFlags_ = 0; }
@@ -601,8 +624,13 @@ void CandyProcessor::rollWith(uint32_t seed)
 
 void CandyProcessor::listen()
 {
+    if (getTotalNumInputChannels() == 0)
+    {
+        { const juce::ScopedLock sl(lock_); status_ = "LISTEN needs an audio input. Use DaliCandy as an effect on the track, or Import WAV in Track analysis."; }
+        flagChange(kChStatus); return;
+    }
     setParam(apvts, pid::listenOn, 1.0f);
-    listenPending_ = true;
+    listenPending_ = true; lastListenPct_ = -2;
     startCapture();
 }
 
@@ -785,6 +813,11 @@ void CandyProcessor::applySuggestionsToSequence()
     ContextOptions o; o.variety = apvts.getRawParameterValue(pid::variety)->load() * 0.01f; o.velBase = cfg.velBase; o.velRange = cfg.velRange; o.pitchVariation = cfg.pitchVariation;
     o.rootNote = gs.rootNote; o.scale = gs.scale; o.musicality = gs.musicality; o.seed = hashCombine(0xBEEF, genCounter_++);
     ContextReport rep; auto ev = buildContextEvents(*a, pal, o, &rep);
+    if (ev.empty())
+    {   // the track has no real gap for candy: add nothing rather than a fill that is not needed
+        { const juce::ScopedLock sl(lock_); status_ = "Your track is already full: no gap is big enough for candy, so nothing was added (raise AMOUNT or analyse a sparser section)"; }
+        flagChange(kChStatus); return;
+    }
     setParam(apvts, pid::seqBars, (float) std::clamp(a->bars, 1, 32));
     { const juce::ScopedLock sl(lock_); preset_.seq.events = ev; preset_.seq.bars = std::clamp(a->bars, 1, 32); preset_.seq.freezeAll = true; preset_.seq.enabled = true; }
     setParam(apvts, pid::seqFreeze, 1.0f); setParam(apvts, pid::seqOn, 1.0f);

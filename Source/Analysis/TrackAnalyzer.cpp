@@ -185,6 +185,7 @@ NegSpaceContext contextAt(const TrackAnalysis& a, int step, const std::array<flo
     return c;
 }
 
+static constexpr float kMinOpportunity = 0.55f;
 void generateSuggestions(TrackAnalysis& a, float density, float negSpaceSensitivity, uint32_t seed)
 {
     if (! a.valid) return;
@@ -208,6 +209,7 @@ void generateSuggestions(TrackAnalysis& a, float density, float negSpaceSensitiv
     {
         if (placed >= target) break;
         if (blocked[(size_t) s] != 0) continue;
+        if (a.opportunity[(size_t) s] < kMinOpportunity) break;      // sorted: nothing better follows - the track does not need a fill here
         bool tooClose = false; for (int p : planned) if (std::abs(p - s) < spacing) { tooClose = true; break; }
         if (tooClose) continue;
         auto ctx = contextAt(a, s, candyBands, planned);
