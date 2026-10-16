@@ -117,7 +117,11 @@ DTEST(wav_export_all_formats_and_rates)
     double err = 0; for (int i = 0; i < b.getNumSamples(); ++i) err = std::max(err, (double) std::abs(b.getSample(0, i) - ref.getSample(0, i)));
     CHECK(err < 1e-6);
     CHECK(! Exporter::writeWav(td.dir.getChildFile("bad.wav"), ref, 44100.0, 20, false));
-    CHECK(! Exporter::writeWav(juce::File("/proc/nonexistent/x.wav"), ref, 44100.0, 24, false));
+    {   // portable unwritable target: a path whose "parent" is a regular file
+        auto notADir = td.dir.getChildFile("regular.txt");
+        notADir.replaceWithText("x");
+        CHECK(! Exporter::writeWav(notADir.getChildFile("x.wav"), ref, 44100.0, 24, false));
+    }
 }
 
 DTEST(normalize_and_integer_formats_never_clip)
