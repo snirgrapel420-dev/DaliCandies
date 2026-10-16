@@ -26,10 +26,19 @@ struct TestPlayHead : juce::AudioPlayHead
     juce::Optional<PositionInfo> getPosition() const override { PositionInfo i; i.setBpm(bpm); i.setPpqPosition(ppq); i.setIsPlaying(playing); i.setTimeSignature(juce::AudioPlayHead::TimeSignature { 4, 4 }); return i; }
 };
 
+void setDataDirEnv(const juce::String& path)
+{
+#if JUCE_WINDOWS
+    _putenv_s("DALICANDY_DATA_DIR", path.toRawUTF8());
+#else
+    setenv("DALICANDY_DATA_DIR", path.toRawUTF8(), 1);
+#endif
+}
+
 void setupEnv()
 {
     static juce::File dir = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("dalicandy_test_data");
-    static bool done = false; if (! done) { dir.deleteRecursively(); dir.createDirectory(); setenv("DALICANDY_DATA_DIR", dir.getFullPathName().toRawUTF8(), 1); done = true; }
+    static bool done = false; if (! done) { dir.deleteRecursively(); dir.createDirectory(); setDataDirEnv(dir.getFullPathName()); done = true; }
 }
 void setP(CandyProcessor& p, const char* id, float plain) { auto* q = p.apvts.getParameter(id); q->setValueNotifyingHost(q->convertTo0to1(plain)); }
 float getP(CandyProcessor& p, const char* id) { return p.apvts.getRawParameterValue(id)->load(); }
