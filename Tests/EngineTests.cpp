@@ -382,3 +382,41 @@ DTEST(candy_engine_mute_solo_layers)
     auto solo = stats(renderEvents(d, 48000.0, 256, { { 0, 1.0f } }, 24000));
     CHECK_MSG(solo.rms > 1.0e-5 && solo.rms != all.rms, "solo plays only layer 2");
 }
+
+// DRIFT: repeated hits of one sound evolve; with drift 0 identical hits stay identical; deterministic and block-size independent
+DTEST(drift_makes_repeats_evolve_and_zero_keeps_them_stable)
+{
+    CandyDNA d; d.numLayers = 2;
+    d.layers[0] = makeLayer(EngineType::MicroSynth, 5, 0.3f); d.layers[1] = makeLayer(EngineType::Resonator, 6, 0.4f);
+    for (auto& l : d.layers) { l.active = true; l.durationMs = 120.0f; l.sendDelay = l.sendReverb = l.sendMod = 0.0f; }
+    for (auto& r : d.routes) r = ModRoute();
+    const double sr = 48000.0; const int gap = 12000, hits = 8, total = gap * hits + 6000;
+    auto render = [&](float drift, int block)
+    {
+        CandyEngine eng; eng.prepare(sr, 2048, QualityMode::Standard); eng.setDrift(drift);
+        std::array<const CandyDNA*, kNumSoundSlots> arr {}; arr[0] = &d; eng.publishBank(buildSoundBank(arr, sr));
+        HostInfo h; h.bpm = 120.0; eng.setHost(h);
+        std::vector<float> out, L((size_t) block), R((size_t) block);
+        for (int pos = 0; pos < total; pos += block)
+        {
+            const int n = std::min(block, total - pos);
+            for (int k = 0; k < hits; ++k) { const int at = 100 + k * gap; if (at >= pos && at < pos + n) { EventRequest r; r.sampleOffset = at - pos; r.velocity = 1.0f; r.eventSeed = 0; eng.queueEvent(r); } }
+            eng.process(L.data(), R.data(), n); for (int i = 0; i < n; ++i) out.push_back(L[(size_t) i]);
+        }
+        return out;
+    };
+    auto hitDiff = [&](const std::vector<float>& x, int a, int b)
+    {
+        double num = 0, den = 1e-12; for (int i = 0; i < 4000; ++i) { const double u = x[(size_t) (100 + a * gap + i)], v = x[(size_t) (100 + b * gap + i)]; num += (u - v) * (u - v); den += u * u; }
+        return std::sqrt(num / den);
+    };
+    const auto still = render(0.0f, 256), moving = render(1.0f, 256);
+    double maxStill = 0, maxMoving = 0;
+    for (int k = 1; k < hits; ++k) { maxStill = std::max(maxStill, hitDiff(still, 0, k)); maxMoving = std::max(maxMoving, hitDiff(moving, 0, k)); }
+    CHECK_MSG(maxStill < 2e-3, "drift 0: hits differ by " + std::to_string(maxStill));
+    CHECK_MSG(maxMoving > 0.2, "drift 1: hits differ by only " + std::to_string(maxMoving));
+    CHECK(render(1.0f, 256) == moving);                                        // reproducible
+    CHECK(render(1.0f, 64) == moving);                                         // independent of the host block size
+    double mid = 0; for (int k = 1; k < hits; ++k) mid = std::max(mid, hitDiff(render(0.3f, 256), 0, k));
+    CHECK(mid > maxStill && mid < maxMoving * 1.5);                            // the knob is a continuum
+}

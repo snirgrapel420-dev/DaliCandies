@@ -7,7 +7,7 @@ Intent Intent::from(const GenSettings& g)
 {
     Intent i; i.complexity = g.complexity; i.motion = g.motion; i.space = g.space; i.density = g.density; i.chaos = g.chaos;
     i.brightness = g.brightness; i.musicality = g.musicality; i.lengthMs = lengthMsFor(g, g.category); i.root = g.rootNote; i.scale = g.scale;
-    i.category = g.category; return i;
+    i.category = g.category; i.sync = g.syncLength; return i;
 }
 
 namespace

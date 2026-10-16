@@ -84,7 +84,7 @@ float lengthMsFor(const GenSettings& g, Category c)
     float base = g.lengthMode >= 3 ? g.customLengthMs : modeMs[std::clamp(g.lengthMode, 0, 2)];
     static const float catScale[kNumCategories] = { 0.6f, 1.2f, 1.1f, 0.8f, 0.9f, 1.6f, 1.8f, 1.0f };
     if (g.lengthMode < 3) base *= catScale[std::clamp((int) c, 0, kNumCategories - 1)];
-    return std::clamp(base, 20.0f, 12000.0f);
+    return std::clamp(base, 20.0f, 20000.0f);
 }
 
 juce::String idToString(uint64_t id) { return juce::String::toHexString((juce::int64) id).paddedLeft('0', 16); }
@@ -334,6 +334,7 @@ juce::var GenSettings::toVar() const
     o->setProperty("ch", chaos); o->setProperty("br", brightness); o->setProperty("mu", musicality); o->setProperty("lm", lengthMode);
     o->setProperty("cl", customLengthMs); o->setProperty("cat", (int) category); o->setProperty("ns", negSpaceSensitivity);
     o->setProperty("root", rootNote); o->setProperty("scale", scale);
+    o->setProperty("fa", familyA); o->setProperty("fb", familyB); o->setProperty("spice", spice); o->setProperty("sync", syncLength);
     return juce::var(o);
 }
 bool GenSettings::fromVar(const juce::var& v, GenSettings& g)
@@ -345,6 +346,8 @@ bool GenSettings::fromVar(const juce::var& v, GenSettings& g)
     g.customLengthMs = getF(v, "cl", 800.f); g.category = (Category) std::clamp(getI(v, "cat", 0), 0, kNumCategories - 1);
     g.negSpaceSensitivity = getF(v, "ns", .5f);
     g.rootNote = std::clamp(getI(v, "root", 9), 0, 11); g.scale = std::clamp(getI(v, "scale", 1), 0, 5);
+    g.familyA = std::clamp(getI(v, "fa", -1), -1, 5); g.familyB = std::clamp(getI(v, "fb", -1), -1, 5); g.spice = clamp01(getF(v, "spice", 0.0f));
+    g.syncLength = getI(v, "sync", 0) != 0;
     return true;
 }
 

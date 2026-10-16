@@ -55,12 +55,23 @@ inline constexpr const char* anaSource = "anaSource";
 inline constexpr const char* capBars = "capBars";
 inline constexpr const char* anaBpm = "anaBpm";
 inline constexpr const char* liveNeg = "liveNeg";
+// Kitchen screen
+inline constexpr const char* famA = "famA";          // 0 = off (use Category), 1..6 = SNAP, CHIME, TWITCH, SWIRL, MOSS, HAZE
+inline constexpr const char* famB = "famB";          // 0 = none, 1..6 = second family (fusion)
+inline constexpr const char* lenSync = "lenSync";    // 0 = free (Length / Custom Length), else a tempo-synced window
+inline constexpr const char* spice = "spice";        // extra weirdness and motion
+inline constexpr const char* drift = "drift";        // evolution per repeat
+inline constexpr const char* keepSkel = "keepSkel";  // KEEP: generate variations of the current sound
+inline constexpr const char* listenOn = "listenOn";  // LISTEN: steer generation toward the gaps of an analysed track
 }
 
 namespace dali
 {
 juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout(bool isFx);
-GenSettings genSettingsFrom(juce::AudioProcessorValueTreeState& s);
+GenSettings genSettingsFrom(juce::AudioProcessorValueTreeState& s, double hostBpm = 0.0);   // hostBpm > 0 resolves a tempo-synced Length
+double lenSyncBeats(int index);                       // beats of the Length choice (0 for Free)
+const char* lenSyncName(int index);
+constexpr int kNumLenSync = 8;
 SeqConfig   seqSettingsFrom(juce::AudioProcessorValueTreeState& s, const SeqConfig& previous);
 const char* rootNoteName(int i);
 }

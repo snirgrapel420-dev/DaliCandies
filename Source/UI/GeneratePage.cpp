@@ -59,6 +59,9 @@ GeneratePage::GeneratePage(CandyProcessor& p) : PageBase(p), exportBar(p)
     for (auto* id : { lengthMode, category, rootNote, scale })
     { combos.push_back(std::make_unique<ParamCombo>(s, id, id == lengthMode ? "Length" : id == category ? "Category" : id == rootNote ? "Root" : "Scale")); macros.addAndMakeVisible(*combos.back()); }
     lenKnob = std::make_unique<ParamKnob>(s, lengthMs, "Custom ms", col::purple); macros.addAndMakeVisible(*lenKnob);
+    macros.addAndMakeVisible(useCategory);
+    useCategory.setTooltip("A family chosen in the Kitchen overrides Category. Click to generate from this Category again.");
+    useCategory.onClick = [this] { for (const char* id : { famA, famB }) if (auto* q = proc.apvts.getParameter(id)) q->setValueNotifyingHost(0.0f); };
 
     generate.setColour(juce::TextButton::buttonColourId, col::magenta.withAlpha(0.35f)); generate.setColour(juce::TextButton::buttonOnColourId, col::magenta);
     generate.onClick = [this] { proc.generate(); }; addAndMakeVisible(generate);
@@ -80,7 +83,7 @@ GeneratePage::GeneratePage(CandyProcessor& p) : PageBase(p), exportBar(p)
         lock[(size_t) i].onClick = [this, i] { const bool v = lock[(size_t) i].getToggleState(); proc.editMain([i, v](CandyDNA& d) { d.layers[(size_t) i].locked = v; }); };
     }
     for (auto* l : { &status, &nameLabel, &infoLabel, &tasteLabel }) { current.addAndMakeVisible(l); l->setInterceptsMouseClicks(false, false); }
-    nameLabel.setFont(font(20.0f, true)); nameLabel.setColour(juce::Label::textColourId, col::text);
+    nameLabel.getProperties().set("ownFont", true); nameLabel.setFont(font(20.0f, true)); nameLabel.setColour(juce::Label::textColourId, col::text);
     infoLabel.setColour(juce::Label::textColourId, col::dim); tasteLabel.setColour(juce::Label::textColourId, col::dim); tasteLabel.setFont(font(11.0f));
     addAndMakeVisible(status); status.setColour(juce::Label::textColourId, col::turquoise);
     addAndMakeVisible(exportBar);
@@ -100,7 +103,8 @@ void GeneratePage::resized()
     auto lo = c.withTrimmedTop(kh * 2 + 6);
     lenKnob->setBounds(lo.getX() + 3 * kw, lo.getY(), kw, kh);
     auto col1 = lo.removeFromLeft(kw * 3 - 8);
-    combos[1]->setBounds(col1.removeFromTop(44)); combos[0]->setBounds(col1.removeFromTop(44));
+    { auto cr = col1.removeFromTop(44); useCategory.setBounds(cr.removeFromRight(86).withTrimmedTop(18)); cr.removeFromRight(4); combos[1]->setBounds(cr); }
+    combos[0]->setBounds(col1.removeFromTop(44));
     auto row = col1.removeFromTop(44); combos[2]->setBounds(row.removeFromLeft(row.getWidth() / 2 - 3)); row.removeFromLeft(6); combos[3]->setBounds(row);
 
     auto top = r.removeFromTop(48); generate.setBounds(top.removeFromLeft(230)); top.removeFromLeft(8); cancelBtn.setBounds(top.removeFromLeft(80)); top.removeFromLeft(10); status.setBounds(top);

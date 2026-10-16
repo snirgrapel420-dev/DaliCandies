@@ -1,7 +1,7 @@
 [ RUN  ] euclid_distribution
-[  OK  ] euclid_distribution (2 ms)
+[  OK  ] euclid_distribution (0 ms)
 [ RUN  ] all_modes_plan_sorted_in_range_deterministic
-[  OK  ] all_modes_plan_sorted_in_range_deterministic (85 ms)
+[  OK  ] all_modes_plan_sorted_in_range_deterministic (71 ms)
 [ RUN  ] modes_produce_events_at_default_settings
     mode 0: 84 events / 16 bars
     mode 1: 52 events / 16 bars
@@ -11,7 +11,7 @@
     mode 5: 83 events / 16 bars
     mode 6: 281 events / 16 bars
     mode 7: 298 events / 16 bars
-[  OK  ] modes_produce_events_at_default_settings (0 ms)
+[  OK  ] modes_produce_events_at_default_settings (1 ms)
 [ RUN  ] seed_changes_pattern
 [  OK  ] seed_changes_pattern (0 ms)
 [ RUN  ] euclidean_mode_matches_pattern
@@ -24,65 +24,87 @@
 [ RUN  ] frozen_events_survive_replan
 [  OK  ] frozen_events_survive_replan (0 ms)
 [ RUN  ] analysis_drives_groove_follower_into_gaps
-[  OK  ] analysis_drives_groove_follower_into_gaps (48 ms)
+[  OK  ] analysis_drives_groove_follower_into_gaps (34 ms)
 [ RUN  ] player_emits_each_event_exactly_once_for_any_block_size
-[  OK  ] player_emits_each_event_exactly_once_for_any_block_size (1660 ms)
+[  OK  ] player_emits_each_event_exactly_once_for_any_block_size (1652 ms)
 [ RUN  ] player_events_start_sample_accurately_and_survive_tempo_change
-[  OK  ] player_events_start_sample_accurately_and_survive_tempo_change (107 ms)
+[  OK  ] player_events_start_sample_accurately_and_survive_tempo_change (112 ms)
 [ RUN  ] player_ignores_stopped_transport_and_handles_jumps
-[  OK  ] player_ignores_stopped_transport_and_handles_jumps (69 ms)
+[  OK  ] player_ignores_stopped_transport_and_handles_jumps (75 ms)
 [ RUN  ] processor_defaults_match_specification
-[  OK  ] processor_defaults_match_specification (292 ms)
+[  OK  ] processor_defaults_match_specification (320 ms)
 [ RUN  ] processor_state_roundtrip_and_corrupt_data
-[  OK  ] processor_state_roundtrip_and_corrupt_data (466 ms)
+[  OK  ] processor_state_roundtrip_and_corrupt_data (551 ms)
 [ RUN  ] instrument_midi_renders_finite_audio_all_rates_and_blocks
-[  OK  ] instrument_midi_renders_finite_audio_all_rates_and_blocks (2945 ms)
+[  OK  ] instrument_midi_renders_finite_audio_all_rates_and_blocks (3013 ms)
 [ RUN  ] instrument_output_is_independent_of_host_block_size
-[  OK  ] instrument_output_is_independent_of_host_block_size (883 ms)
+[  OK  ] instrument_output_is_independent_of_host_block_size (743 ms)
 [ RUN  ] sequencer_is_host_synced_and_block_size_independent
-[  OK  ] sequencer_is_host_synced_and_block_size_independent (1620 ms)
+[  OK  ] sequencer_is_host_synced_and_block_size_independent (1182 ms)
 [ RUN  ] fx_dry_wet_sidechain_and_passthrough
-[  OK  ] fx_dry_wet_sidechain_and_passthrough (533 ms)
+[  OK  ] fx_dry_wet_sidechain_and_passthrough (531 ms)
 [ RUN  ] unified_plugin_is_instrument_and_effect_in_one
-[  OK  ] unified_plugin_is_instrument_and_effect_in_one (423 ms)
+[  OK  ] unified_plugin_is_instrument_and_effect_in_one (354 ms)
 [ RUN  ] realtime_safety_no_allocations_in_process_block
-[  OK  ] realtime_safety_no_allocations_in_process_block (664 ms)
+[  OK  ] realtime_safety_no_allocations_in_process_block (586 ms)
 [ RUN  ] generation_selection_dna_operations_via_processor
-[  OK  ] generation_selection_dna_operations_via_processor (2219 ms)
+[  OK  ] generation_selection_dna_operations_via_processor (2284 ms)
 [ RUN  ] capture_analysis_suggestions_and_placement
-[  OK  ] capture_analysis_suggestions_and_placement (437 ms)
+[  OK  ] capture_analysis_suggestions_and_placement (325 ms)
 [ RUN  ] concurrent_edits_while_audio_runs
-[  OK  ] concurrent_edits_while_audio_runs (1237 ms)
+[  OK  ] concurrent_edits_while_audio_runs (1171 ms)
 [ RUN  ] export_through_processor
-[  OK  ] export_through_processor (819 ms)
+[  OK  ] export_through_processor (728 ms)
 [ RUN  ] processor_cpu_load_is_reasonable
-    processBlock load at 48k/512: mean 3.4%, worst 39.5% (single core, dense pattern, High quality off)
-[  OK  ] processor_cpu_load_is_reasonable (460 ms)
+    processBlock load at 48k/512: mean 3.1%, worst 10.0% (single core, dense pattern, High quality off)
+[  OK  ] processor_cpu_load_is_reasonable (424 ms)
+[ RUN  ] roll_ignores_choices_and_is_reproducible
+[  OK  ] roll_ignores_choices_and_is_reproducible (13664 ms)
+[ RUN  ] kitchen_generation_uses_family_fusion_and_keep
+[  OK  ] kitchen_generation_uses_family_fusion_and_keep (3620 ms)
+[ RUN  ] synced_dish_is_dragged_out_at_exactly_the_window_length
+[  OK  ] synced_dish_is_dragged_out_at_exactly_the_window_length (277 ms)
+[ RUN  ] listen_aims_generation_at_the_quietest_band_of_the_track
+[  OK  ] listen_aims_generation_at_the_quietest_band_of_the_track (1861 ms)
 [ RUN  ] preset_roundtrip_is_lossless
-[  OK  ] preset_roundtrip_is_lossless (286 ms)
+[  OK  ] preset_roundtrip_is_lossless (269 ms)
 [ RUN  ] preset_v1_migrates_and_newer_is_rejected
-[  OK  ] preset_v1_migrates_and_newer_is_rejected (340 ms)
+[  OK  ] preset_v1_migrates_and_newer_is_rejected (257 ms)
 [ RUN  ] preset_manager_full_lifecycle
-[  OK  ] preset_manager_full_lifecycle (5664 ms)
+[  OK  ] preset_manager_full_lifecycle (6122 ms)
 [ RUN  ] wav_export_all_formats_and_rates
-[  OK  ] wav_export_all_formats_and_rates (887 ms)
+[  OK  ] wav_export_all_formats_and_rates (954 ms)
 [ RUN  ] normalize_and_integer_formats_never_clip
-[  OK  ] normalize_and_integer_formats_never_clip (108 ms)
+[  OK  ] normalize_and_integer_formats_never_clip (97 ms)
 [ RUN  ] sequence_export_loop_multibar_layers_drywet_batch_midi
-[  OK  ] sequence_export_loop_multibar_layers_drywet_batch_midi (2477 ms)
+[  OK  ] sequence_export_loop_multibar_layers_drywet_batch_midi (2508 ms)
 [ RUN  ] temp_files_for_drag_and_drop_are_real_and_cleaned
-[  OK  ] temp_files_for_drag_and_drop_are_real_and_cleaned (92 ms)
+[  OK  ] temp_files_for_drag_and_drop_are_real_and_cleaned (99 ms)
 [ RUN  ] renderer_is_repeatable_and_history_independent
-[  OK  ] renderer_is_repeatable_and_history_independent (3390 ms)
+[  OK  ] renderer_is_repeatable_and_history_independent (3623 ms)
 [ RUN  ] factory_bank_is_complete_and_renders
-[  OK  ] factory_bank_is_complete_and_renders (598 ms)
+[  OK  ] factory_bank_is_complete_and_renders (740 ms)
+[ RUN  ] families_and_fusion_names
+[  OK  ] families_and_fusion_names (0 ms)
+[ RUN  ] every_family_pair_makes_valid_fusions
+[  OK  ] every_family_pair_makes_valid_fusions (8251 ms)
+[ RUN  ] fusion_is_deterministic_and_differs_from_pure
+[  OK  ] fusion_is_deterministic_and_differs_from_pure (320 ms)
+[ RUN  ] pure_family_only_uses_its_own_archetypes
+[  OK  ] pure_family_only_uses_its_own_archetypes (2513 ms)
+[ RUN  ] spice_adds_motion_and_weirdness
+[  OK  ] spice_adds_motion_and_weirdness (1216 ms)
+[ RUN  ] keep_skeleton_varies_only_details
+[  OK  ] keep_skeleton_varies_only_details (2420 ms)
+[ RUN  ] tempo_synced_lengths_fit_their_window
+[  OK  ] tempo_synced_lengths_fit_their_window (5008 ms)
 [ RUN  ] archetypes_cover_all_categories
 [  OK  ] archetypes_cover_all_categories (0 ms)
 [ RUN  ] every_archetype_renders_valid_sound
     archetype acceptance 202 / 204
-[  OK  ] every_archetype_renders_valid_sound (21240 ms)
+[  OK  ] every_archetype_renders_valid_sound (21267 ms)
 [ RUN  ] generation_is_deterministic
-[  OK  ] generation_is_deterministic (2113 ms)
+[  OK  ] generation_is_deterministic (2159 ms)
 [ RUN  ] batch_has_at_least_eight_diverse_candidates
     Micro Details          tried 24 rejected 0  archetypes 6  minDist 0.36
     Psychedelic Movement   tried 24 rejected 0  archetypes 4  minDist 0.31
@@ -92,59 +114,61 @@
     Atmospheric Candy      tried 24 rejected 0  archetypes 4  minDist 0.21
     Transitions            tried 25 rejected 1  archetypes 4  minDist 0.33
     Experimental           tried 24 rejected 0  archetypes 4  minDist 0.17
-[  OK  ] batch_has_at_least_eight_diverse_candidates (22217 ms)
+[  OK  ] batch_has_at_least_eight_diverse_candidates (22723 ms)
 [ RUN  ] batch_cancel_stops_early
-[  OK  ] batch_cancel_stops_early (249 ms)
+[  OK  ] batch_cancel_stops_early (228 ms)
 [ RUN  ] settings_steer_results
     mean log2 centroid dark 9.67 bright 11.26
-[  OK  ] settings_steer_results (8656 ms)
+[  OK  ] settings_steer_results (8749 ms)
 [ RUN  ] mutate_respects_locks
-[  OK  ] mutate_respects_locks (217 ms)
+[  OK  ] mutate_respects_locks (214 ms)
 [ RUN  ] regenerate_layer_keeps_locked_params
-[  OK  ] regenerate_layer_keeps_locked_params (68 ms)
+[  OK  ] regenerate_layer_keeps_locked_params (81 ms)
 [ RUN  ] breed_produces_valid_child
-[  OK  ] breed_produces_valid_child (838 ms)
+[  OK  ] breed_produces_valid_child (941 ms)
 [ RUN  ] dna_roundtrip_through_json
-[  OK  ] dna_roundtrip_through_json (309 ms)
+[  OK  ] dna_roundtrip_through_json (335 ms)
 [ RUN  ] taste_model_biases_selection
-[  OK  ] taste_model_biases_selection (61 ms)
+[  OK  ] taste_model_biases_selection (63 ms)
 [ RUN  ] history_recall
 [  OK  ] history_recall (0 ms)
 [ RUN  ] engines_produce_audio_all_sample_rates
-[  OK  ] engines_produce_audio_all_sample_rates (722 ms)
+[  OK  ] engines_produce_audio_all_sample_rates (725 ms)
 [ RUN  ] engines_extreme_parameters_are_stable
-[  OK  ] engines_extreme_parameters_are_stable (192 ms)
+[  OK  ] engines_extreme_parameters_are_stable (194 ms)
 [ RUN  ] engines_are_deterministic
-[  OK  ] engines_are_deterministic (87 ms)
+[  OK  ] engines_are_deterministic (80 ms)
 [ RUN  ] engines_independent_of_block_size
-[  OK  ] engines_independent_of_block_size (31 ms)
+[  OK  ] engines_independent_of_block_size (32 ms)
 [ RUN  ] silence_in_silence_out_for_zero_velocity_micro
 [  OK  ] silence_in_silence_out_for_zero_velocity_micro (1 ms)
 [ RUN  ] spectral_engine_is_aligned_after_priming
-[  OK  ] spectral_engine_is_aligned_after_priming (3 ms)
+[  OK  ] spectral_engine_is_aligned_after_priming (4 ms)
 [ RUN  ] pitch_tracks_for_micro_synth
-[  OK  ] pitch_tracks_for_micro_synth (9 ms)
+[  OK  ] pitch_tracks_for_micro_synth (10 ms)
 [ RUN  ] hilbert_frequency_shift_moves_a_sine
 [  OK  ] hilbert_frequency_shift_moves_a_sine (2 ms)
 [ RUN  ] filter_resonance_is_stable
 [  OK  ] filter_resonance_is_stable (8 ms)
 [ RUN  ] effects_are_stable_with_extreme_settings
-[  OK  ] effects_are_stable_with_extreme_settings (231 ms)
+[  OK  ] effects_are_stable_with_extreme_settings (265 ms)
 [ RUN  ] mod_engine_routes_and_validation
 [  OK  ] mod_engine_routes_and_validation (1 ms)
 [ RUN  ] mod_engine_all_sources_finite_and_bounded
 [  OK  ] mod_engine_all_sources_finite_and_bounded (2 ms)
 [ RUN  ] candy_engine_output_independent_of_host_block_size
-[  OK  ] candy_engine_output_independent_of_host_block_size (1443 ms)
+[  OK  ] candy_engine_output_independent_of_host_block_size (1402 ms)
 [ RUN  ] candy_engine_events_start_sample_accurately
-[  OK  ] candy_engine_events_start_sample_accurately (29 ms)
+[  OK  ] candy_engine_events_start_sample_accurately (27 ms)
 [ RUN  ] candy_engine_voice_limit_and_stealing
-[  OK  ] candy_engine_voice_limit_and_stealing (397 ms)
+[  OK  ] candy_engine_voice_limit_and_stealing (402 ms)
 [ RUN  ] candy_engine_silence_and_tail_decay
-[  OK  ] candy_engine_silence_and_tail_decay (161 ms)
+[  OK  ] candy_engine_silence_and_tail_decay (194 ms)
 [ RUN  ] candy_engine_sample_rates_and_quality_modes
-[  OK  ] candy_engine_sample_rates_and_quality_modes (691 ms)
+[  OK  ] candy_engine_sample_rates_and_quality_modes (752 ms)
 [ RUN  ] candy_engine_mute_solo_layers
-[  OK  ] candy_engine_mute_solo_layers (49 ms)
+[  OK  ] candy_engine_mute_solo_layers (54 ms)
+[ RUN  ] drift_makes_repeats_evolve_and_zero_keeps_them_stable
+[  OK  ] drift_makes_repeats_evolve_and_zero_keeps_them_stable (582 ms)
 
-64 test cases run, 0 failed, 705885 checks, 0 failed checks (88.8 s)
+76 test cases run, 0 failed, 706663 checks, 0 failed checks (129.5 s)

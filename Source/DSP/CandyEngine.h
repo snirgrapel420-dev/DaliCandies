@@ -7,6 +7,7 @@
 //  - global send effects + master section
 #include "Core/Types.h"
 #include "Core/CandyDNA.h"
+#include "Core/Rng.h"
 #include "DSP/Engine.h"
 #include "DSP/Modulation/ModEngine.h"
 #include "DSP/Effects/Effects.h"
@@ -94,6 +95,9 @@ public:
     void setMasterOverride(bool on, float width, float gainDb) { ovr_ = on; ovrWidth_ = width; ovrGain_ = gainDb; }
     // Dry rendering: send effects (delay / reverb / mod-fx) are skipped; inserts and the master section stay active.
     void setBypassSends(bool b) { bypassSends_ = b; }
+    // DRIFT 0..1: every new event nudges a slowly wandering offset of pitch, timbre parameters and length,
+    // so repeated hits evolve instead of repeating.  0 = every hit identical in structure.
+    void setDrift(float amount) { drift_ = std::clamp(amount, 0.0f, 1.0f); }
     // Conservative adaptive processing (psychoacoustic awareness): extra low cut and one dynamic-EQ style cut.
     void setAdaptive(float lowCutHz, bool eqOn, float eqHz, float eqGainDb, float eqQ, float widthScale, float trimDb)
     { adLowCut_ = lowCutHz; adEqOn_ = eqOn; adEqHz_ = eqHz; adEqDb_ = eqGainDb; adEqQ_ = eqQ; adWidth_ = widthScale; adTrim_ = trimDb; }
@@ -151,6 +155,7 @@ private:
     const SoundBankData* curBank_ = nullptr;
     int idleDelay_ = 0, idleReverb_ = 0, idleMod_ = 0;
     bool bypassSends_ = false;
+    float drift_ = 0.0f, driftPitch_ = 0.0f, driftLen_ = 0.0f; std::array<float, kParamsPerLayer> driftP_ {}; Rng driftRng_ { 0xD21F7u };
     float adLowCut_ = 0, adEqHz_ = 1000, adEqDb_ = 0, adEqQ_ = 1, adWidth_ = 1, adTrim_ = 0; bool adEqOn_ = false;
     Biquad adEq_[2]; float adEqLastHz_ = -1, adEqLastDb_ = 1000;
 };

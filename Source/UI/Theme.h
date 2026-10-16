@@ -36,7 +36,7 @@ public:
     void positionComboBoxText(juce::ComboBox&, juce::Label&) override;
     juce::Font getComboBoxFont(juce::ComboBox&) override { return font(13.0f); }
     juce::Font getPopupMenuFont() override { return font(14.0f); }
-    juce::Font getLabelFont(juce::Label&) override { return font(12.0f); }
+    juce::Font getLabelFont(juce::Label& l) override { return l.getProperties().contains("ownFont") ? l.getFont() : font(12.0f); }   // labels with the "ownFont" property keep their own font
     juce::Font getTextButtonFont(juce::TextButton&, int) override { return font(13.0f, true); }
     void drawPopupMenuBackground(juce::Graphics&, int w, int h) override;
     void drawScrollbar(juce::Graphics&, juce::ScrollBar&, int x, int y, int w, int h, bool vertical, int thumbStart, int thumbSize, bool over, bool down) override;

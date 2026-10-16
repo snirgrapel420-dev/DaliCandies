@@ -1,6 +1,6 @@
 // Headless GUI smoke test and screenshot tool.  Run under xvfb:
 //   xvfb-run -a ./DaliCandyEditorShots_artefacts/Release/DaliCandyEditorShots <out-dir>
-// Creates the processor + editor, fills the model (generate, import a synthetic track), pages through all five
+// Creates the processor + editor, fills the model (generate, import a synthetic track), pages through the Kitchen and the five advanced
 // pages exercising refresh/tick and writes one PNG per page.  Exit code 0 = no crash and every page rendered.
 #include "UI/CandyEditor.h"
 #include <cstdio>
@@ -52,6 +52,8 @@ int main(int argc, char** argv)
           std::unique_ptr<juce::AudioFormatWriter> w(wav.createWriterFor(os.get(), sr, 1, 16, {}, 0)); if (w) { os.release(); w->writeFromAudioSampleBuffer(b, 0, n); w.reset(); }
           proc.apvts.getParameter(pid::anaBpm)->setValueNotifyingHost(proc.apvts.getParameter(pid::anaBpm)->convertTo0to1(120.0f));
           proc.importAudioFile(f); }
+        { auto set = [&](const char* id, float v) { auto* q = proc.apvts.getParameter(id); q->setValueNotifyingHost(q->convertTo0to1(v)); };
+          set(pid::famA, 2); set(pid::famB, 5); set(pid::spice, 40); set(pid::lenSync, 5); }       // CHIME x MOSS, 1 bar window
         proc.generate(); waitIdle(proc, 60000);
         if (proc.candidates().size() < 8) { std::printf("[%s] FAIL: only %d candidates\n", tag, (int) proc.candidates().size()); ++failures; }
         proc.selectCandidate(0); pump(300);
@@ -61,12 +63,12 @@ int main(int argc, char** argv)
             if (! ed) { std::printf("[%s] FAIL: no editor\n", tag); ++failures; continue; }
             ed->setSize(1280, 820); ed->setVisible(false);
             auto* ce = dynamic_cast<ui::CandyEditor*>(ed.get());
-            for (int page = 0; page < 5; ++page)
+            for (int page = 0; page < 6; ++page)
             {
                 ce->showPage(page); pump(500);
                 // exercise some controls on the page (model-bound code paths)
-                if (page == 2) { proc.editMain([](CandyDNA& d) { d.layers[0].gainDb = -9.0f; }); pump(400); }
-                if (page == 1) { proc.regeneratePattern(true); pump(300); }
+                if (page == 3) { proc.editMain([](CandyDNA& d) { d.layers[0].gainDb = -9.0f; }); pump(400); }
+                if (page == 2) { proc.regeneratePattern(true); pump(300); }
                 const auto img = ed->createComponentSnapshot(ed->getLocalBounds(), true, 1.0f);
                 const auto f = out.getChildFile(juce::String(tag) + "_page" + juce::String(page + 1) + ".png");
                 f.deleteFile(); juce::FileOutputStream fos(f); juce::PNGImageFormat png;

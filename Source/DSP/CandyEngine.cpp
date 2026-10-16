@@ -64,6 +64,7 @@ void CandyEngine::reset()
     queued_ = 0; voiceCounter_ = 0; totalEvents_ = 0; idleDelay_ = idleReverb_ = idleMod_ = 0;
     delay_.reset(); reverb_.reset(); modfx_.reset(); master_.reset();
     for (auto& g : gDest_) g = 0;
+    driftPitch_ = driftLen_ = 0.0f; driftP_.fill(0.0f); driftRng_.reseed(0xD21F7u);
 }
 
 void CandyEngine::publishBank(std::shared_ptr<SoundBankData> bank)
@@ -133,6 +134,15 @@ void CandyEngine::startVoice(const EventRequest& e)
     v.patch = sl.patch; v.active = true; v.fading = false; v.fadeOut = 0; v.startId = ++voiceCounter_; v.timeSec = 0;
     v.velocity = std::clamp(e.velocity, 0.0f, 1.0f); v.pitchOffset = e.pitchOffset; v.midiNote = e.midiNote; v.eventSeed = e.eventSeed;
     v.lengthScale = std::clamp(e.lengthScale, 0.05f, 16.0f); v.peakEnv = 1.0f;
+    if (drift_ > 0.0f)
+    {   // mean-reverting random walks: the sound wanders away from its origin over the repeats but never runs off
+        driftPitch_ = driftPitch_ * 0.88f + driftRng_.bipolar() * drift_ * 1.6f;
+        driftLen_   = driftLen_   * 0.85f + driftRng_.bipolar() * drift_ * 0.35f;
+        for (auto& x : driftP_) x = x * 0.9f + driftRng_.bipolar() * drift_ * 0.12f;
+        v.pitchOffset += std::clamp(driftPitch_, -6.0f * drift_, 6.0f * drift_);
+        v.lengthScale = std::clamp(v.lengthScale * std::exp(driftLen_), 0.05f, 16.0f);
+        for (auto& L : v.patch.layers) if (L.active) for (int i = 0; i < kParamsPerLayer; ++i) L.p[(size_t) i] = clamp01(L.p[(size_t) i] + driftP_[(size_t) i]);
+    }
     v.bufPos = kControlRate; v.finished = false;
     for (auto& g : v.gDest) g = 0.0f;
     ++totalEvents_;

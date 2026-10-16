@@ -56,11 +56,25 @@ std::vector<OfflineRenderer::Ev> Exporter::eventsFrom(const SeqPattern& p, doubl
 static juce::AudioBuffer<float> renderOnce(OfflineRenderer& r, const ExportSource& s, ExportKind kind, bool dry, int solo, const ExportFormat& f, const std::function<bool()>& cancelled)
 {
     RenderOptions o; o.sampleRate = f.sampleRate; o.quality = f.quality; o.blockSize = 512; o.velocity = f.velocity; o.tailMs = f.tailMs;
-    o.dry = dry; o.soloLayer = solo; o.bpm = s.bpm; o.trimSilence = (kind == ExportKind::OneShot) && f.trimSilence;
+    o.dry = dry; o.soloLayer = solo; o.bpm = s.bpm; o.trimSilence = (kind == ExportKind::OneShot) && f.trimSilence && f.fitMs <= 0.0f;
     if (kind == ExportKind::OneShot)
     {
         if (s.slots[0] == nullptr) return {};
-        return r.renderOneShot(*s.slots[0], o);
+        auto b = r.renderOneShot(*s.slots[0], o);
+        if (f.fitMs > 0.0f && b.getNumSamples() > 0)
+        {
+            const int n = std::max(1, (int) std::lround((double) f.fitMs * 0.001 * f.sampleRate));
+            juce::AudioBuffer<float> fit(b.getNumChannels(), n); fit.clear();
+            const int keep = std::min(n, b.getNumSamples());
+            for (int c = 0; c < b.getNumChannels(); ++c) fit.copyFrom(c, 0, b, c, 0, keep);
+            if (b.getNumSamples() > n)                                   // longer than the window: 8 ms fade so the cut never clicks
+            {
+                const int fade = std::min(n, (int) (0.008 * f.sampleRate));
+                fit.applyGainRamp(0, std::max(0, n - fade), fade, 1.0f, 0.0f);
+            }
+            return fit;
+        }
+        return b;
     }
     if (s.pattern == nullptr) return {};
     auto ev = Exporter::eventsFrom(*s.pattern, s.bpm);

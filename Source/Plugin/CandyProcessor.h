@@ -71,12 +71,16 @@ public:
 
     bool isFx() const { return isFx_; }          // true = unified plug-in (instrument + effect); false only for the instrument-only test/legacy build
     juce::AudioProcessorValueTreeState apvts;
+    juce::MidiKeyboardState keyboardState;                     // on-screen keyboard of the Kitchen (notes are merged into the host MIDI)
 
     //== model (message thread) ====================================================
     Preset  presetSnapshot() const;                       // copy of the current sound set + sequence
     CandyDNA mainSound() const;
     SeqConfig seqConfig() const;
     GenSettings genSettings() { return genSettingsFrom(apvts); }
+    GenSettings kitchenSettings(int* gapBand = nullptr);       // generation settings for the Kitchen: families, spice, synced length, LISTEN steering
+    double hostBpm() const { return hostBpm_.load(); }          // tempo of the host (Analysis BPM when the host gives none)
+    double syncWindowMs() const;                                // length of the synced window in ms (0 when Length is Free)
     void editMain(const std::function<void(CandyDNA&)>& fn, bool rebuildNow = false);       // schedules a (coalesced) bank rebuild
     void setMainSound(const CandyDNA& d, bool toHistory = true);
     void setSlotSound(int slot, const CandyDNA* d);          // nullptr clears the slot
@@ -90,7 +94,10 @@ public:
     CandyHistory& history() { return history_; }
 
     //== generation & DNA operations (async; results arrive via change messages) =======
-    void generate();
+    void generate();                                         // fresh dishes (or variations of the current one when Keep Skeleton is on)
+    void roll();                                             // ignores the family choice: random family / fusion / settings, then picks one at random
+    void rollWith(uint32_t seed);
+    void listen();                                           // capture the track, analyse it, place events in its gaps and aim a new generation at them
     void cancelWork();
     bool busy() const { return busyJobs_.load() > 0; }
     float progress() const { return progress_.load(); }
@@ -202,6 +209,7 @@ private:
     juce::ThreadPool pool_ { juce::ThreadPoolOptions {}.withNumberOfThreads(1).withThreadName("DaliCandy worker") };
     TempExportFiles dragFiles_;
     std::atomic<bool> alive_ { true }; std::atomic<uint32_t> uiFlags_ { 0 };
+    std::atomic<double> hostBpm_ { 120.0 }; std::atomic<bool> rollPending_ { false }, listenPending_ { false }; uint32_t rollPick_ = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CandyProcessor)
 };

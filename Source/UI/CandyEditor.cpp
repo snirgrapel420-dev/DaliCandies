@@ -15,14 +15,17 @@ void CandyEditor::Meter::paint(juce::Graphics& g)
 CandyEditor::CandyEditor(CandyProcessor& p) : juce::AudioProcessorEditor(p), meter(p), proc(p)
 {
     setLookAndFeel(&laf);
-    pages[0] = std::make_unique<GeneratePage>(proc); pages[1] = std::make_unique<SequencePage>(proc); pages[2] = std::make_unique<SynthPage>(proc);
-    pages[3] = std::make_unique<ModPage>(proc); pages[4] = std::make_unique<AnalysisPage>(proc);
-    static const char* names[] = { "GENERATE", "SEQUENCE", "SYNTHESIS", "MODULATION", "TRACK ANALYSIS" };
-    for (int i = 0; i < 5; ++i)
+    pages[0] = std::make_unique<KitchenPage>(proc); pages[1] = std::make_unique<GeneratePage>(proc); pages[2] = std::make_unique<SequencePage>(proc); pages[3] = std::make_unique<SynthPage>(proc);
+    pages[4] = std::make_unique<ModPage>(proc); pages[5] = std::make_unique<AnalysisPage>(proc);
+    static const char* names[] = { "KITCHEN", "GENERATE", "SEQUENCE", "SYNTHESIS", "MODULATION", "TRACK ANALYSIS" };
+    for (int i = 0; i < 6; ++i)
     {
         addChildComponent(*pages[(size_t) i]); tabs[(size_t) i].setButtonText(names[i]); tabs[(size_t) i].setClickingTogglesState(false);
-        tabs[(size_t) i].setColour(juce::TextButton::buttonOnColourId, i % 2 ? col::turquoise : col::magenta); addAndMakeVisible(tabs[(size_t) i]); tabs[(size_t) i].onClick = [this, i] { showPage(i); };
+        tabs[(size_t) i].setColour(juce::TextButton::buttonOnColourId, i % 2 ? col::turquoise : col::magenta); addChildComponent(tabs[(size_t) i]); tabs[(size_t) i].onClick = [this, i] { showPage(i); };
     }
+    tabs[0].setVisible(true);
+    addAndMakeVisible(advanced); advanced.setClickingTogglesState(false); advanced.setColour(juce::TextButton::buttonOnColourId, col::purple);
+    advanced.setTooltip("Show the full toolbox: generator, sequencer, synthesis, modulation matrix and track analysis"); advanced.onClick = [this] { setAdvanced(! advancedOn); };
     for (auto* b : { &prev, &next, &presetName, &save, &fav, &rnd }) addAndMakeVisible(b);
     addAndMakeVisible(search); search.setTextToShowWhenEmpty("search presets...", col::dim); search.setFont(font(13.0f));
     search.onReturnKey = [this] { searchText = search.getText(); showSearchMenu(); }; search.onTextChange = [this] { searchText = search.getText(); };
@@ -44,12 +47,12 @@ CandyEditor::CandyEditor(CandyProcessor& p) : juce::AudioProcessorEditor(p), met
     if (proc.isFx()) mk(drySlider, dryAtt, dryLabel, pid::dry, "DRY");
     quality = std::make_unique<ParamCombo>(proc.apvts, pid::quality, "Quality"); addAndMakeVisible(*quality);
     if (! proc.uiState.isObject()) proc.uiState = juce::var(new juce::DynamicObject());
-    const int saved = (int) proc.uiState.getProperty("page", 0);
+    const int saved = (int) proc.uiState.getProperty("kpage", 0); advancedOn = (bool) proc.uiState.getProperty("adv", false);
     constrainer.setSizeLimits(1040, 700, 1900, 1200); constrainer.setFixedAspectRatio(0.0);
     setConstrainer(&constrainer); setResizable(true, true);
     const int w = std::clamp((int) proc.uiState.getProperty("w", 1240), 1040, 1900), h = std::clamp((int) proc.uiState.getProperty("h", 800), 700, 1200);
     setSize(w, h);
-    showPage(std::clamp(saved, 0, 4));
+    setAdvanced(advancedOn || saved > 0); showPage(std::clamp(saved, 0, 5));
     for (auto& pg : pages) pg->refresh(0xffffffffu);
     startTimerHz(30);
 }
@@ -57,16 +60,26 @@ CandyEditor::CandyEditor(CandyProcessor& p) : juce::AudioProcessorEditor(p), met
 CandyEditor::~CandyEditor()
 {
     stopTimer();
-    if (proc.uiState.isObject()) { proc.uiState.getDynamicObject()->setProperty("page", page); proc.uiState.getDynamicObject()->setProperty("w", getWidth()); proc.uiState.getDynamicObject()->setProperty("h", getHeight()); }
+    if (proc.uiState.isObject()) { proc.uiState.getDynamicObject()->setProperty("kpage", page); proc.uiState.getDynamicObject()->setProperty("adv", advancedOn); proc.uiState.getDynamicObject()->setProperty("w", getWidth()); proc.uiState.getDynamicObject()->setProperty("h", getHeight()); }
     setLookAndFeel(nullptr);
 }
 
 void CandyEditor::showPage(int i)
 {
-    page = std::clamp(i, 0, 4);
-    for (int k = 0; k < 5; ++k) { pages[(size_t) k]->setVisible(k == page); tabs[(size_t) k].setToggleState(k == page, juce::dontSendNotification); }
+    page = std::clamp(i, 0, 5);
+    if (page > 0 && ! advancedOn) setAdvanced(true);
+    for (int k = 0; k < 6; ++k) { pages[(size_t) k]->setVisible(k == page); tabs[(size_t) k].setToggleState(k == page, juce::dontSendNotification); }
     pages[(size_t) page]->refresh(0xffffffffu);
-    if (proc.uiState.isObject()) proc.uiState.getDynamicObject()->setProperty("page", page);
+    if (proc.uiState.isObject()) proc.uiState.getDynamicObject()->setProperty("kpage", page);
+}
+
+void CandyEditor::setAdvanced(bool on)
+{
+    advancedOn = on; advanced.setToggleState(on, juce::dontSendNotification);
+    for (int k = 1; k < 6; ++k) tabs[(size_t) k].setVisible(on);
+    if (! on && page > 0) showPage(0);
+    resized();
+    if (proc.uiState.isObject()) proc.uiState.getDynamicObject()->setProperty("adv", on);
 }
 
 void CandyEditor::paint(juce::Graphics& g)
@@ -89,8 +102,9 @@ void CandyEditor::resized()
     prev.setBounds(row1.removeFromLeft(28)); row1.removeFromLeft(3); presetName.setBounds(row1.removeFromLeft(300)); row1.removeFromLeft(3); next.setBounds(row1.removeFromLeft(28)); row1.removeFromLeft(8);
     save.setBounds(row1.removeFromLeft(54)); row1.removeFromLeft(4); fav.setBounds(row1.removeFromLeft(44)); row1.removeFromLeft(4); rnd.setBounds(row1.removeFromLeft(70)); row1.removeFromLeft(8);
     meter.setBounds(row1.removeFromRight(180)); row1.removeFromRight(8); search.setBounds(row1.removeFromLeft(std::min(220, row1.getWidth())));
-    head.removeFromTop(4); auto row2 = head; const int tw = std::min(150, row2.getWidth() / 5);
-    for (auto& t : tabs) t.setBounds(row2.removeFromLeft(tw).reduced(2, 0));
+    head.removeFromTop(4); auto row2 = head; advanced.setBounds(row2.removeFromRight(110).reduced(2, 0));
+    const int tw = std::min(150, std::max(60, (row2.getWidth() - 8) / (advancedOn ? 6 : 1)));
+    for (auto& t : tabs) if (t.isVisible()) t.setBounds(row2.removeFromLeft(tw).reduced(2, 0));
     auto foot = r.removeFromBottom(38).reduced(10, 4);
     footerStatus.setBounds(foot.removeFromLeft(foot.getWidth() * 34 / 100)); footerStats.setBounds(foot.removeFromRight(210));
     quality->setBounds(foot.removeFromRight(120).withTrimmedTop(0)); foot.removeFromRight(8);

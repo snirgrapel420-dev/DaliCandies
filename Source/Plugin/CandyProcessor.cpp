@@ -134,7 +134,8 @@ void CandyProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
             hostPlaying = pos->getIsPlaying();
         }
     const bool freeRun = apvts.getRawParameterValue(pid::seqFreeRun)->load() > 0.5f;
-    host.bpm = bpm;
+    host.bpm = bpm; hostBpm_.store(bpm, std::memory_order_relaxed);
+    engine_.setDrift(apvts.getRawParameterValue(pid::drift)->load() * 0.01f);
     const bool useHost = hostPpq && hostPlaying;
     if (useHost) { host.playing = true; freePpq_ = host.ppq; }
     else if (freeRun) { host.playing = true; host.ppq = freePpq_; }
@@ -192,6 +193,7 @@ void CandyProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
     const bool seqOn = apvts.getRawParameterValue(pid::seqOn)->load() > 0.5f;
     const int audit = auditionSlot_.exchange(-1);
 
+    keyboardState.processNextMidiBuffer(midi, 0, n, true);        // on-screen keyboard (no-op without a GUI)
     // ---- render in chunks ----------------------------------------------------------------------------------------------------
     for (int start = 0; start < n; start += maxBlock_)
     {
@@ -301,6 +303,7 @@ void CandyProcessor::applyParamsFromPreset(const Preset& p)
     setParam(apvts, musicality, g.musicality * 100.0f); setParam(apvts, lengthMode, (float) g.lengthMode); setParam(apvts, lengthMs, g.customLengthMs);
     setParam(apvts, category, (float) (int) g.category); setParam(apvts, negSpace, g.negSpaceSensitivity * 100.0f);
     setParam(apvts, rootNote, (float) g.rootNote); setParam(apvts, scale, (float) g.scale);
+    if (g.familyA >= 0) { setParam(apvts, famA, (float) (g.familyA + 1)); setParam(apvts, famB, (float) (g.familyB + 1)); setParam(apvts, spice, g.spice * 100.0f); }   // presets from before the Kitchen keep the current selection
     const auto& s = p.seq;
     setParam(apvts, seqOn, s.enabled ? 1.0f : 0.0f); setParam(apvts, seqMode, (float) (int) s.mode); setParam(apvts, seqBars, (float) s.bars);
     setParam(apvts, seqDiv, (float) s.division); setParam(apvts, seqFeel, (float) s.feel); setParam(apvts, seqSwing, s.swing * 100.0f);
@@ -518,15 +521,46 @@ void CandyProcessor::cancelWork() { cancel_ = true; { const juce::ScopedLock sl(
 //==============================================================================================================
 // generation & DNA operations
 //==============================================================================================================
+double CandyProcessor::syncWindowMs() const
+{
+    const double beats = lenSyncBeats((int) apvts.getRawParameterValue(pid::lenSync)->load());
+    return beats > 0.0 ? beats * 60000.0 / std::max(20.0, hostBpm_.load()) : 0.0;
+}
+
+GenSettings CandyProcessor::kitchenSettings(int* gapBand)
+{
+    auto gs = genSettingsFrom(apvts, hostBpm_.load());
+    if (gapBand) *gapBand = -1;
+    if (apvts.getRawParameterValue(pid::listenOn)->load() > 0.5f)
+        if (auto a = analysis(); a != nullptr && a->valid)
+        {   // aim the sound at the quietest band (400 Hz - 12 kHz) of the analysed track
+            int best = -1; float lowest = 1.0e9f;
+            for (int b = 3; b <= 6; ++b) if (a->bandDb[(size_t) b] < lowest) { lowest = a->bandDb[(size_t) b]; best = b; }
+            if (best >= 0)
+            {
+                gs.brightness = std::clamp(std::log2(bandCentreHz(best) / 500.0f) / 5.0f, 0.05f, 0.95f);
+                if (gapBand) *gapBand = best;
+            }
+        }
+    return gs;
+}
+
 void CandyProcessor::generate()
 {
-    const auto gs = genSettingsFrom(apvts); const uint32_t seed = hashCombine(0xDA11u, genCounter_++); const double sr = std::max(8000.0, sr_);
+    int gap = -1;
+    const auto gs = kitchenSettings(&gap); const uint32_t seed = hashCombine(0xDA11u, genCounter_++); const double sr = std::max(8000.0, sr_);
+    const bool keep = apvts.getRawParameterValue(pid::keepSkel)->load() > 0.5f;
+    CandyDNA base = mainSound(); const bool haveBase = keep && base.activeLayerCount() > 0;
     TasteModel tasteCopy = taste_;
-    runJob("Generating candy...", [this, gs, seed, sr, tasteCopy]() mutable
+    const juce::String how = haveBase ? "variations" : "dishes";
+    const juce::String aim = gap >= 0 ? juce::String(" aimed at ") + juce::String((int) bandCentreHz(gap)) + " Hz" : juce::String();
+    runJob(haveBase ? "Cooking variations..." : "Generating candy...", [this, gs, seed, sr, tasteCopy, haveBase, base, how, aim]() mutable
     {
         CandyGenerator gen(&tasteCopy); GenerateOptions o; o.count = 8; o.oversample = 3; o.sampleRate = std::min(sr, 48000.0);
         o.cancelled = [this] { return cancel_.load() || ! alive_; }; o.progress = [this](float p) { progress_ = p; };
-        GenerateStats st; auto batch = gen.generateBatch(gs, seed, o, &st);
+        GenerateStats st; std::vector<CandyDNA> batch;
+        if (haveBase) { batch = gen.variations(base, seed, 8, 0.28f, gs, o.sampleRate); st.tried = 8; st.accepted = (int) batch.size(); st.rejected = 8 - st.accepted; }
+        else batch = gen.generateBatch(gs, seed, o, &st);
         std::vector<CandidateView> views; OfflineRenderer r;
         for (auto& d : batch)
         {
@@ -534,13 +568,38 @@ void CandyProcessor::generate()
             RenderOptions ro; ro.sampleRate = 44100.0; ro.quality = QualityMode::Eco; ro.trimSilence = true;
             CandidateView v; v.dna = d; v.wave = waveThumb(r.renderOneShot(d, ro)); views.push_back(std::move(v));
         }
-        postToMessageThread([this, views = std::move(views), st]() mutable
+        postToMessageThread([this, views = std::move(views), st, how, aim]() mutable
         {
-            { const juce::ScopedLock sl(lock_); candidates_ = std::move(views);
-              status_ = juce::String(candidates_.size()) + " candies (" + juce::String(st.rejected) + " rejected of " + juce::String(st.tried) + " tried)"; }
+            int n = 0;
+            { const juce::ScopedLock sl(lock_); candidates_ = std::move(views); n = (int) candidates_.size();
+              status_ = juce::String(n) + " " + how + aim + " (" + juce::String(st.rejected) + " rejected of " + juce::String(st.tried) + " tried)"; }
             flagChange(kChCandidates | kChStatus);
+            if (rollPending_.exchange(false) && n > 0) selectCandidate((int) (rollPick_ % (uint32_t) n));
         });
     });
+}
+
+void CandyProcessor::roll() { rollWith(hashCombine(juce::Time::getMillisecondCounter(), genCounter_ * 2654435761u)); }
+
+void CandyProcessor::rollWith(uint32_t seed)
+{
+    Rng r(seed);
+    auto set = [&](const char* id, float plain) { setParam(apvts, id, plain); };
+    const int a = r.rangeInt(0, kNumFamilies - 1); int b = -1;
+    if (r.chance(0.6f)) { b = r.rangeInt(0, kNumFamilies - 2); if (b >= a) ++b; }
+    set(pid::famA, (float) (a + 1)); set(pid::famB, (float) (b + 1));
+    set(pid::keepSkel, 0.0f); set(pid::listenOn, 0.0f);
+    set(pid::spice, r.range(5.0f, 100.0f)); set(pid::complexity, r.range(25.0f, 95.0f)); set(pid::motion, r.range(20.0f, 100.0f));
+    set(pid::brightness, r.range(15.0f, 90.0f)); set(pid::chaos, r.range(10.0f, 90.0f)); set(pid::density, r.range(15.0f, 70.0f));
+    rollPick_ = r.next(); rollPending_ = true;
+    generate();
+}
+
+void CandyProcessor::listen()
+{
+    setParam(apvts, pid::listenOn, 1.0f);
+    listenPending_ = true;
+    startCapture();
 }
 
 void CandyProcessor::selectCandidate(int index)
@@ -674,6 +733,7 @@ void CandyProcessor::beginAnalysis(std::vector<float> mono, double sr, double bp
         {
             { const juce::ScopedLock sl(lock_); analysis_ = shared; status_ = "Analysis ready: " + juce::String(shared->bars) + " bars, " + juce::String((int) shared->suggestions.size()) + " suggestions"; }
             updateAdaptive(); flagChange(kChAnalysis | kChStatus);
+            if (listenPending_.exchange(false)) { applySuggestionsToSequence(); generate(); }
         });
     });
 }
@@ -742,14 +802,15 @@ juce::AudioBuffer<float> CandyProcessor::renderPreview(const ExportFormat& fmt, 
 void CandyProcessor::exportAsync(ExportWhat what, const juce::File& target, const ExportFormat& fmt, ExportMix mix)
 {
     auto p = presetSnapshot(); auto pat = pattern(); auto cands = candidates(); const double bpm = apvts.getRawParameterValue(pid::anaBpm)->load();
-    runJob("Exporting...", [this, what, target, fmt, mix, p, pat, cands, bpm]
+    ExportFormat fmtFit = fmt; if (what == ExportWhat::OneShot) fmtFit.fitMs = (float) syncWindowMs();
+    runJob("Exporting...", [this, what, target, fmt, fmtFit, mix, p, pat, cands, bpm]
     {
         Exporter ex; ExportSource s; s.slots = p.slotPointers(); s.pattern = pat.get(); s.bpm = bpm;
         auto cancelled = [this] { return cancel_.load() || ! alive_; }; ExportResult r;
         const juce::String base = sanitizeFileName(p.main().name);
         switch (what)
         {
-            case ExportWhat::OneShot:    r = ex.exportFile(target, s, ExportKind::OneShot, mix, fmt, cancelled); break;
+            case ExportWhat::OneShot:    r = ex.exportFile(target, s, ExportKind::OneShot, mix, fmtFit, cancelled); break;
             case ExportWhat::Loop:       r = ex.exportFile(target, s, ExportKind::Loop, mix, fmt, cancelled); break;
             case ExportWhat::MultiBar:   r = ex.exportFile(target, s, ExportKind::MultiBar, mix, fmt, cancelled); break;
             case ExportWhat::Layers:     r = ex.exportLayers(target, base, s, ExportKind::OneShot, fmt, cancelled); break;
@@ -767,7 +828,8 @@ juce::File CandyProcessor::makeDragFile(ExportWhat what, const ExportFormat& fmt
     const juce::String base = sanitizeFileName(p.main().name);
     if (what == ExportWhat::Midi) return dragFiles_.createMidi(base, s);
     const ExportKind k = what == ExportWhat::Loop ? ExportKind::Loop : what == ExportWhat::MultiBar ? ExportKind::MultiBar : ExportKind::OneShot;
-    auto buf = ex.render(s, k, ExportMix::Full, -1, fmt);
+    ExportFormat f2 = fmt; if (k == ExportKind::OneShot) f2.fitMs = (float) syncWindowMs();
+    auto buf = ex.render(s, k, ExportMix::Full, -1, f2);
     if (buf.getNumSamples() == 0) return {};
     return dragFiles_.create(base + (k == ExportKind::Loop ? "_loop" : k == ExportKind::MultiBar ? "_bars" : ""), buf, fmt.sampleRate, fmt.bitDepth);
 }

@@ -14,20 +14,21 @@ uint64_t CandyGenerator::makeId(uint32_t seed, int archetype, uint32_t salt)
     return id ? id : 1ull;
 }
 
-int CandyGenerator::pickArchetype(Rng& r, const Intent& in) const
+int CandyGenerator::pickFrom(Rng& r, const std::vector<int>& idx) const
 {
-    const auto idx = archetypesOf(in.category);
     const auto& t = archetypeTable();
     std::vector<float> w;
     for (int i : idx)
     {
         float x = t[(size_t) i].baseWeight;
-        if (taste_) x *= taste_->archetypeMultiplier(in.category, i);
+        if (taste_) x *= taste_->archetypeMultiplier(t[(size_t) i].category, i);
         w.push_back(x);
     }
     if (idx.empty()) return 0;
     return idx[(size_t) r.pickWeighted(w)];
 }
+
+int CandyGenerator::pickArchetype(Rng& r, const Intent& in) const { return pickFrom(r, archetypesOf(in.category)); }
 
 bool CandyGenerator::validate(const BufferFeatures& f, float targetMs, float& why)
 {
@@ -45,7 +46,7 @@ float CandyGenerator::score(const CandyDNA& d, const BufferFeatures& f, const In
 {
     auto gauss = [](float x, float w) { return std::exp(-(x * x) / (w * w)); };
     const float durMs = std::max(1.0f, f.durationSec * 1000.0f);
-    const float target = std::max(20.0f, in.lengthMs * (archetypeTable()[(size_t) std::clamp(d.archetype, 0, (int) archetypeTable().size() - 1)].lengthFactor));
+    const float target = std::max(20.0f, in.lengthMs * (in.sync ? 1.0f : archetypeTable()[(size_t) std::clamp(d.archetype, 0, (int) archetypeTable().size() - 1)].lengthFactor));
     const float lengthFit = gauss(std::log2(durMs / target), 1.6f);
 
     const float expectC = 500.0f * std::exp2(in.brightness * 5.0f);
@@ -130,28 +131,48 @@ bool CandyGenerator::analyseAndFinish(CandyDNA& d, const GenSettings& s, double 
     return true;
 }
 
-bool CandyGenerator::generateOne(const GenSettings& s, uint32_t seed, double sr, CandyDNA& out, int forceArchetype)
+CandyDNA CandyGenerator::buildRaw(const GenSettings& s, Rng& r, int a, const Intent& in) const
 {
-    const Intent in = Intent::from(s);
-    Rng r(seed);
-    const int a = forceArchetype >= 0 ? forceArchetype : pickArchetype(r, in);
     const auto& def = archetypeTable()[(size_t) a];
     CandyDNA d;
-    d.seed = seed; d.category = def.category; d.archetype = a; d.role = def.role; d.generatorVersion = kGeneratorVersion;
-    d.id = makeId(seed, a, 0);
+    d.seed = 0; d.category = def.category; d.archetype = a; d.role = def.role; d.generatorVersion = kGeneratorVersion;
     d.numLayers = 0;
     for (auto& l : d.layers) l = LayerConfig();
     for (auto& rt : d.routes) rt = ModRoute();
     Rng rb = r.derive(1);
-    Intent local = in; local.lengthMs = in.lengthMs * def.lengthFactor;
+    Intent local = in; local.category = def.category;
+    local.lengthMs = lengthMsFor(s, def.category) * (s.syncLength ? 1.0f : def.lengthFactor);
     def.build(d, rb, local);
     Rng rm = r.derive(2); applyModulation(d, rm, local);
     Rng rf = r.derive(3); applyEffects(d, rf, local);
     Rng rn = r.derive(4); d.name = makeName(rn, def.name);
-    // layer count limit and per-layer sanity
     d.numLayers = 0; for (int i = 0; i < kMaxLayers; ++i) if (d.layers[(size_t) i].active) d.numLayers = i + 1;
-    // taste weighting of engine choice can veto the single worst engine only through scoring (see score())
+    return d;
+}
+
+bool CandyGenerator::generateOne(const GenSettings& s, uint32_t seed, double sr, CandyDNA& out, int forceArchetype)
+{
+    const Intent in = Intent::from(s);
+    Rng r(seed);
+    const bool byFamily = forceArchetype < 0 && s.familyA >= 0;
+    const bool fusion = byFamily && s.familyB >= 0 && s.familyB != s.familyA;
+    const int a = forceArchetype >= 0 ? forceArchetype : (byFamily ? pickFrom(r, archetypesOfFamily(s.familyA)) : pickArchetype(r, in));
+    CandyDNA d = buildRaw(s, r, a, in);
+    d.seed = seed; d.id = makeId(seed, a, 0);
+    if (fusion)
+    {
+        const int b = pickFrom(r, archetypesOfFamily(s.familyB));
+        Rng rB = r.derive(50);
+        CandyDNA db = buildRaw(s, rB, b, in);
+        const auto nm = d.name;
+        d = fuse(d, db, seed);
+        d.archetype = a; d.id = makeId(seed, a, 0);
+        Rng rn = r.derive(51); d.name = makeName(rn, fusionName(s.familyA, s.familyB));
+        (void) nm;
+    }
+    if (s.spice > 0.0f) { Rng rs = r.derive(60); applySpice(d, rs, s.spice); }
     if (! analyseAndFinish(d, s, sr)) return false;
+    if (s.syncLength && ! fitLength(d, s, sr)) return false;
     out = std::move(d);
     return true;
 }
@@ -204,7 +225,7 @@ static float snapPitch(float p, const GenSettings& s, Rng& r, float amount)
     return std::clamp(v, 24.0f, 108.0f);
 }
 
-CandyDNA CandyGenerator::mutate(const CandyDNA& src, uint32_t seed, float amount, const GenSettings& s)
+CandyDNA CandyGenerator::mutate(const CandyDNA& src, uint32_t seed, float amount, const GenSettings& s, bool keepSkeleton)
 {
     amount = std::clamp(amount, 0.0f, 1.0f);
     CandyDNA d = src; Rng r(seed);
@@ -215,7 +236,12 @@ CandyDNA CandyGenerator::mutate(const CandyDNA& src, uint32_t seed, float amount
         auto& l = d.layers[(size_t) li]; if (! l.active || l.locked) continue;
         for (int i = 0; i < kParamsPerLayer; ++i)
             if (! paramLocked(l, i) && r.chance(0.25f + 0.5f * amount)) l.p[(size_t) i] = clamp01(l.p[(size_t) i] + r.normal() * amount * 0.22f);
-        if (r.chance(0.5f)) l.pitch = snapPitch(l.pitch, s, r, amount);
+        if (r.chance(0.5f)) l.pitch = snapPitch(l.pitch, s, r, keepSkeleton ? amount * 0.35f : amount);
+        if (keepSkeleton)
+        {
+            if (r.chance(0.5f + 0.4f * amount)) l.seed = r.next() | 1u;
+            continue;                                                  // timing, level, pan, sends and inserts are the skeleton
+        }
         const float tf = std::exp(r.bipolar() * amount * 0.45f);
         l.decayMs = std::clamp(l.decayMs * tf, 1.0f, 8000.0f); l.releaseMs = std::clamp(l.releaseMs * std::exp(r.bipolar() * amount * 0.4f), 1.0f, 8000.0f);
         l.durationMs = std::clamp(l.durationMs * tf, 5.0f, 12000.0f);
@@ -231,7 +257,8 @@ CandyDNA CandyGenerator::mutate(const CandyDNA& src, uint32_t seed, float amount
         rt.depth = std::clamp(rt.depth + r.normal() * amount * 0.18f, -1.0f, 1.0f);
         if (r.chance(amount * 0.06f)) rt.depth = -rt.depth;
     }
-    for (auto& m : d.mods.lfo) m.rateHz = std::clamp(m.rateHz * std::exp(r.bipolar() * amount * 0.5f), 0.05f, 40.0f);
+    for (auto& m : d.mods.lfo) m.rateHz = std::clamp(m.rateHz * std::exp(r.bipolar() * amount * (keepSkeleton ? 0.25f : 0.5f)), 0.05f, 40.0f);
+    if (keepSkeleton) { d.name = src.name.upToFirstOccurrenceOf(" ~", false, false) + " ~" + juce::String(r.rangeInt(10, 99)); return d; }
     d.fx.delayFeedback = std::clamp(d.fx.delayFeedback + r.bipolar() * amount * 0.15f, 0.0f, 0.75f);
     d.fx.reverbSize = clamp01(d.fx.reverbSize + r.bipolar() * amount * 0.2f);
     d.name = src.name.upToFirstOccurrenceOf(" ~", false, false) + " ~" + juce::String(r.rangeInt(10, 99));
@@ -330,6 +357,178 @@ CandyDNA CandyGenerator::breed(const CandyDNA& a, const CandyDNA& b, uint32_t se
     c.parentA = a.id; c.parentB = b.id; c.id = makeId(seed, c.archetype, 201);
     c.name = a.name.upToFirstOccurrenceOf(" ~", false, false).upToFirstOccurrenceOf(" x ", false, false) + " x " + b.name.upToFirstOccurrenceOf(" ~", false, false);
     return c;
+}
+
+
+// ---------------------------------------------------------------------------------------------------------------
+// Fusion, spice, tempo-fit and KEEP variations
+// ---------------------------------------------------------------------------------------------------------------
+namespace
+{
+struct SrcPool { int first, count; };
+static bool poolOf(int src, SrcPool& p)
+{
+    if (src >= kSrcLfo1 && src <= kSrcLfo4)        { p = { kSrcLfo1, kNumLfos }; return true; }
+    if (src >= kSrcMseg1 && src <= kSrcMseg4)      { p = { kSrcMseg1, kNumMsegs }; return true; }
+    if (src == kSrcSH1 || src == kSrcSH2)          { p = { kSrcSH1, kNumSH }; return true; }
+    if (src == kSrcChaos1 || src == kSrcChaos2)    { p = { kSrcChaos1, kNumChaos }; return true; }
+    if (src == kSrcRandomWalk)                     { p = { kSrcRandomWalk, 1 }; return true; }
+    if (src == kSrcStep)                           { p = { kSrcStep, 1 }; return true; }
+    return false;                                   // live sources (velocity, note, macros ...) carry no configuration
+}
+static int remapDest(int dest, const std::array<int, kMaxLayers>& map)
+{
+    if (dest < kLayerDestBase) { const int L = dest / kParamsPerLayer; if (L >= kMaxLayers || map[(size_t) L] < 0) return -1; return layerParamDest(map[(size_t) L], dest % kParamsPerLayer); }
+    if (dest < 96)             { const int k = dest - kLayerDestBase; const int L = k / 8; if (L >= kMaxLayers || map[(size_t) L] < 0) return -1; return layerCtlDest(map[(size_t) L], k % 8); }
+    return dest;
+}
+}
+
+CandyDNA CandyGenerator::fuse(const CandyDNA& a, const CandyDNA& b, uint32_t seed)
+{
+    Rng r(hashCombine(seed, 0xF05Eu));
+    auto activeOf = [](const CandyDNA& d) { std::vector<int> v; for (int i = 0; i < kMaxLayers; ++i) if (d.layers[(size_t) i].active) v.push_back(i); return v; };
+    const auto la = activeOf(a), lb = activeOf(b);
+    const int na = (int) la.size(), nb = (int) lb.size();
+    const int keepB = std::min(nb, 2);
+    const int keepA = std::min(na, kMaxLayers - keepB);
+    const int keepB2 = std::min(nb, kMaxLayers - keepA);
+    CandyDNA c = a;
+    c.seed = seed; c.id = makeId(seed, a.archetype, 300); c.parentA = 0; c.parentB = 0; c.meta = UserMeta();
+    for (auto& l : c.layers) l = LayerConfig();
+    for (auto& rt : c.routes) rt = ModRoute();
+    std::array<int, kMaxLayers> mapA, mapB; mapA.fill(-1); mapB.fill(-1);
+    int slot = 0;
+    for (int i = 0; i < keepA; ++i) { c.layers[(size_t) slot] = a.layers[(size_t) la[(size_t) i]]; mapA[(size_t) la[(size_t) i]] = slot++; }
+    for (int i = 0; i < keepB2; ++i)
+    {
+        auto l = b.layers[(size_t) lb[(size_t) i]]; l.seed = hashCombine(l.seed, 0xB0B0u) | 1u; l.startOffsetMs += r.range(0.0f, 25.0f);
+        c.layers[(size_t) slot] = l; mapB[(size_t) lb[(size_t) i]] = slot++;
+    }
+    c.numLayers = slot;
+    // routes of A keep their modulators; routes of B get modulators of the same kind that A does not use
+    std::array<bool, kNumModSources> used {}; int rn = 0;
+    for (auto& rt : a.routes)
+    {
+        if (! rt.enabled || rn >= kNumModRoutes) continue;
+        const int nd = remapDest(rt.dest, mapA); if (nd < 0) continue;
+        ModRoute x = rt; x.dest = nd; c.routes[(size_t) rn++] = x; used[(size_t) rt.source] = true;
+    }
+    std::array<int, kNumModSources> srcMap; srcMap.fill(-2);
+    for (auto& rt : b.routes)
+    {
+        if (! rt.enabled || rn >= kNumModRoutes) continue;
+        const int nd = remapDest(rt.dest, mapB); if (nd < 0) continue;
+        int src = rt.source; SrcPool p;
+        if (poolOf(src, p))
+        {
+            if (srcMap[(size_t) src] == -2)
+            {
+                int pick = -1; for (int k = 0; k < p.count; ++k) if (! used[(size_t) (p.first + k)]) { pick = p.first + k; break; }
+                srcMap[(size_t) src] = pick;
+                if (pick >= 0)
+                {
+                    used[(size_t) pick] = true;
+                    if (src >= kSrcLfo1 && src <= kSrcLfo4)        c.mods.lfo[(size_t) (pick - kSrcLfo1)] = b.mods.lfo[(size_t) (src - kSrcLfo1)];
+                    else if (src >= kSrcMseg1 && src <= kSrcMseg4) c.mods.mseg[(size_t) (pick - kSrcMseg1)] = b.mods.mseg[(size_t) (src - kSrcMseg1)];
+                    else if (src == kSrcSH1 || src == kSrcSH2)     c.mods.sh[(size_t) (pick - kSrcSH1)] = b.mods.sh[(size_t) (src - kSrcSH1)];
+                    else if (src == kSrcChaos1 || src == kSrcChaos2) c.mods.chaos[(size_t) (pick - kSrcChaos1)] = b.mods.chaos[(size_t) (src - kSrcChaos1)];
+                    else if (src == kSrcRandomWalk)                c.mods.rw = b.mods.rw;
+                    else if (src == kSrcStep)                      c.mods.step = b.mods.step;
+                }
+            }
+            src = srcMap[(size_t) src]; if (src < 0) continue;
+        }
+        ModRoute x = rt; x.dest = nd; x.source = src; c.routes[(size_t) rn++] = x;
+    }
+    // FX bus: halfway between the two recipes
+    const float t = 0.5f;
+    c.fx = a.fx;
+    c.fx.delayFeedback = lerp(a.fx.delayFeedback, b.fx.delayFeedback, t); c.fx.reverbSize = lerp(a.fx.reverbSize, b.fx.reverbSize, t);
+    c.fx.reverbDamp = lerp(a.fx.reverbDamp, b.fx.reverbDamp, t); c.fx.width = lerp(a.fx.width, b.fx.width, t);
+    c.fx.delayLevel = lerp(a.fx.delayLevel, b.fx.delayLevel, t); c.fx.reverbLevel = lerp(a.fx.reverbLevel, b.fx.reverbLevel, t);
+    if (r.chance(0.5f)) { c.fx.modType = b.fx.modType; c.fx.modRate = b.fx.modRate; c.fx.modDepth = b.fx.modDepth; c.fx.modLevel = b.fx.modLevel; }
+    c.durationMs = std::max(a.durationMs, b.durationMs);
+    c.role = a.role;
+    return c;
+}
+
+void CandyGenerator::applySpice(CandyDNA& d, Rng& r, float spice)
+{
+    spice = clamp01(spice);
+    if (spice <= 0.0f) return;
+    // 1) motion: deeper and faster modulation
+    for (auto& rt : d.routes) if (rt.enabled) rt.depth = std::clamp(rt.depth * (1.0f + 1.2f * spice), -1.0f, 1.0f);
+    for (auto& m : d.mods.lfo) m.rateHz = std::clamp(m.rateHz * (1.0f + 1.5f * spice), 0.05f, 40.0f);
+    // 2) weirdness: a chaotic route into a random parameter of a random active layer (when a source is free)
+    std::array<bool, kNumModSources> used {}; for (auto& rt : d.routes) if (rt.enabled) used[(size_t) rt.source] = true;
+    std::vector<int> act; for (int i = 0; i < kMaxLayers; ++i) if (d.layers[(size_t) i].active) act.push_back(i);
+    if (act.empty()) return;
+    const int extra = spice > 0.66f ? 2 : (spice > 0.25f ? 1 : 0);
+    for (int e = 0; e < extra; ++e)
+    {
+        int slot = -1; for (int i = 0; i < kNumModRoutes; ++i) if (! d.routes[(size_t) i].enabled) { slot = i; break; }
+        int src = -1; for (int cand : { (int) kSrcChaos1, (int) kSrcChaos2, (int) kSrcRandomWalk }) if (! used[(size_t) cand]) { src = cand; break; }
+        if (slot < 0 || src < 0) break;
+        used[(size_t) src] = true;
+        if (src == kSrcChaos1 || src == kSrcChaos2) { auto& c = d.mods.chaos[(size_t) (src - kSrcChaos1)]; c.rateHz = r.range(1.5f, 6.0f + 10.0f * spice); c.r = r.range(3.6f, 3.99f); }
+        else d.mods.rw.rateHz = r.range(4.0f, 14.0f);
+        auto& rt = d.routes[(size_t) slot];
+        rt = ModRoute(); rt.enabled = true; rt.source = src; rt.dest = layerParamDest(act[(size_t) r.rangeInt(0, (int) act.size() - 1)], r.rangeInt(0, kParamsPerLayer - 1));
+        rt.depth = (r.chance(0.5f) ? 1.0f : -1.0f) * r.range(0.15f, 0.25f + 0.45f * spice);
+    }
+    // 3) weirdness: a layer without insert may get a frequency shifter / ring mod / wavefolder
+    for (int i : act)
+    {
+        auto& l = d.layers[(size_t) i];
+        if (l.insert == InsertFx::None && r.chance(spice * 0.45f))
+        {
+            static const InsertFx weird[] = { InsertFx::FreqShift, InsertFx::RingMod, InsertFx::Wavefolder, InsertFx::Comb };
+            l.insert = weird[r.rangeInt(0, 3)]; l.insertA = r.range(0.2f, 0.8f); l.insertB = r.range(0.2f, 0.8f);
+        }
+    }
+    d.fx.width = std::clamp(d.fx.width + 0.3f * spice, 0.0f, 1.6f);
+    d.fx.modLevel = clamp01(d.fx.modLevel + 0.2f * spice);
+}
+
+bool CandyGenerator::fitLength(CandyDNA& d, const GenSettings& s, double sr)
+{
+    const float target = std::max(20.0f, s.customLengthMs);
+    auto okNow = [&] { return d.durationMs >= 0.5f * target && d.durationMs <= 1.3f * target; };
+    for (int iter = 0; iter < 5; ++iter)
+    {
+        const float ratio = target / std::max(5.0f, d.durationMs);
+        if (okNow() && ratio > 0.8f && ratio < 1.25f) return true;           // close enough: no more passes
+        const float k = std::clamp(ratio, 0.2f, 6.0f);
+        for (auto& l : d.layers) if (l.active)
+        {
+            l.decayMs = std::clamp(l.decayMs * k, 1.0f, 12000.0f); l.releaseMs = std::clamp(l.releaseMs * k, 1.0f, 12000.0f);
+            l.durationMs = std::clamp(l.durationMs * k, 5.0f, 20000.0f); l.startOffsetMs = std::clamp(l.startOffsetMs * k, 0.0f, 8000.0f);
+            l.attackMs = std::clamp(l.attackMs * std::sqrt(k), 0.05f, 4000.0f);
+            if (k > 1.6f) l.sendDelay = std::max(l.sendDelay, 0.25f);
+            else if (k < 1.0f) { const float q = k * k; l.sendReverb *= q; l.sendDelay *= q; l.sendMod *= q; }   // short windows cannot afford long tails
+        }
+        if (k > 1.6f)       { d.fx.delayFeedback = std::max(d.fx.delayFeedback, 0.5f); d.fx.reverbSize = std::max(d.fx.reverbSize, 0.6f); }
+        else if (k < 0.7f)  { d.fx.delayFeedback *= 0.5f; d.fx.reverbSize *= 0.5f; }
+        for (auto& m : d.mods.lfo) if (! m.sync) m.rateHz = std::clamp(m.rateHz / std::sqrt(k), 0.05f, 40.0f);
+        if (! analyseAndFinish(d, s, sr)) return false;
+    }
+    return okNow();
+}
+
+std::vector<CandyDNA> CandyGenerator::variations(const CandyDNA& base, uint32_t seed, int count, float detail, const GenSettings& s, double sr)
+{
+    std::vector<CandyDNA> out; Rng r(hashCombine(seed, 0x4B33Bu));
+    for (int i = 0, tries = 0; (int) out.size() < count && tries < count * 4; ++tries, ++i)
+    {
+        // spread the amounts a little so the eight variations are not all alike
+        const float amt = std::clamp(detail * (0.6f + 0.8f * ((float) (i % count) / (float) std::max(1, count - 1))), 0.02f, 1.0f);
+        CandyDNA v = mutate(base, hashCombine(seed, (uint32_t) (i + 1)), amt, s, true);
+        if (s.spice > 0.0f) { Rng rs = r.derive((uint32_t) i); applySpice(v, rs, s.spice * 0.6f); }
+        v.id = makeId(seed, base.archetype, 400 + (uint32_t) i);
+        if (analyseAndFinish(v, s, sr)) out.push_back(std::move(v));
+    }
+    return out;
 }
 
 // ---------------------------------------------------------------------------------------------------------------

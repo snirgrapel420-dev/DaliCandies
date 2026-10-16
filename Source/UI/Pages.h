@@ -12,6 +12,62 @@ public:
     CandyProcessor& proc;
 };
 
+// The simple main screen: six families, every pair as a fusion, ROLL, KEEP, SPICE, LISTEN, DRIFT, synced length, drag-out.
+class KitchenPage : public PageBase
+{
+public:
+    explicit KitchenPage(CandyProcessor&);
+    void resized() override;
+    void refresh(uint32_t) override;
+    void tick() override;
+    void paintOverChildren(juce::Graphics&) override;
+    static juce::Colour familyColour(int f);
+private:
+    struct FlavorMatrix : public juce::Component, public juce::TooltipClient
+    {
+        explicit FlavorMatrix(KitchenPage& o) : owner(o) {}
+        void paint(juce::Graphics&) override; void mouseMove(const juce::MouseEvent&) override; void mouseExit(const juce::MouseEvent&) override; void mouseDown(const juce::MouseEvent&) override;
+        juce::String getTooltip() override;
+        KitchenPage& owner; int hoverR = -1, hoverC = -1;
+        juce::Rectangle<float> cellArea() const; bool cellAt(juce::Point<float> p, int& r, int& c) const;
+    };
+    struct Plate : public juce::Component
+    {
+        Plate(KitchenPage& o, int i);
+        void resized() override; void paint(juce::Graphics&) override; void set(const CandidateView* v, bool selected);
+        KitchenPage& owner; int index; WaveView wave; juce::String name; bool has = false;
+    };
+    struct DragPad : public juce::Component
+    {
+        DragPad(KitchenPage& o, bool midi) : owner(o), isMidi(midi) {}
+        void paint(juce::Graphics&) override; void mouseDrag(const juce::MouseEvent&) override;
+        KitchenPage& owner; bool isMidi; juce::String text;
+    };
+    struct Keys : public juce::Component
+    {
+        explicit Keys(CandyProcessor& p) : proc(p) {}
+        void paint(juce::Graphics&) override; void mouseDown(const juce::MouseEvent&) override; void mouseDrag(const juce::MouseEvent&) override; void mouseUp(const juce::MouseEvent&) override;
+        int noteAt(juce::Point<float> p) const; void press(int note); ~Keys() override { release(); }
+        void release();
+        CandyProcessor& proc; int base = 48, down = -1;
+    };
+    void setFamilies(int a, int b);
+    void cookSoon();
+    void updateDishLabels();
+    void renderDishWave();
+    juce::String dishTitle() const;
+
+    FlavorMatrix matrix { *this };
+    juce::TextButton roll { "ROLL" }, cook { "COOK" }, listen { "LISTEN" }, octDown { "<" }, octUp { ">" };
+    std::unique_ptr<ParamToggle> keep;
+    std::unique_ptr<ParamKnob> spiceKnob, driftKnob, brightKnob, motionKnob; std::unique_ptr<ParamCombo> lenBox;
+    TitledPanel pMatrix { "FLAVOUR MATRIX", col::magenta }, pDish { "THE DISH", col::turquoise }, pPlates { "EIGHT PLATES", col::purple }, pKnobs { "SEASONING", col::magenta };
+    WaveView dishWave; DragPad dragWav { *this, false }, dragMidi { *this, true }; Keys keys;
+    juce::Label dishName, dishInfo, status;
+    std::vector<std::unique_ptr<Plate>> plates; uint64_t lastMainId = 0; int shownA = -1, shownB = -1;
+    bool previewDirty = true; int previewCountdown = 0; bool cookPending = false; float progressShown = 0.0f; juce::String lengthNote;
+};
+
 class GeneratePage : public PageBase
 {
 public:
@@ -31,7 +87,7 @@ private:
     void rebuildCards();
     TitledPanel macros { "Intent", col::magenta }, actions { "Shape the sound", col::turquoise }, current { "Current candy", col::purple };
     std::vector<std::unique_ptr<ParamKnob>> knobs; std::vector<std::unique_ptr<ParamCombo>> combos; std::unique_ptr<ParamKnob> lenKnob, negKnob;
-    juce::TextButton generate { "GENERATE" }, mutate { "Mutate" }, evolve { "Evolve" }, recall { "Recall" }, audition { "Audition" }, like { "Like" }, fav { "Favourite" }, dislike { "Dislike" }, cancelBtn { "Cancel" };
+    juce::TextButton useCategory { "Use category" }, generate { "GENERATE" }, mutate { "Mutate" }, evolve { "Evolve" }, recall { "Recall" }, audition { "Audition" }, like { "Like" }, fav { "Favourite" }, dislike { "Dislike" }, cancelBtn { "Cancel" };
     std::array<juce::TextButton, kMaxLayers> regen; std::array<juce::ToggleButton, kMaxLayers> lock;
     std::unique_ptr<ModelKnob> mutAmount;
     float mutateAmount = 0.35f; int recallDepth = 1;

@@ -152,6 +152,10 @@ struct GenSettings
     float negSpaceSensitivity = 0.5f;
     int   rootNote = 9;            // pitch class 0..11 (9 = A)
     int   scale = 1;               // 0 minor, 1 phrygian, 2 harmonic minor, 3 minor pentatonic, 4 phrygian dominant, 5 chromatic
+    // Kitchen screen: sound families (0..5, -1 = use `category`), optional second family = fusion, spice, tempo-synced length
+    int   familyA = -1, familyB = -1;
+    float spice = 0.0f;            // 0..1: extra weirdness and motion
+    bool  syncLength = false;      // customLengthMs is a tempo-derived window the sound must fill (fitted and verified)
     juce::var toVar() const;
     static bool fromVar(const juce::var& v, GenSettings& out);
 };

@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <new>
 #include <thread>
+#include <set>
 
 // ---- allocation tracking (real-time safety check): counts allocations made on a tracked thread -------------------------------
 static thread_local bool gTrackAllocs = false;
@@ -373,4 +374,90 @@ DTEST(processor_cpu_load_is_reasonable)
     }
     std::printf("    processBlock load at 48k/512: mean %.1f%%, worst %.1f%% (single core, dense pattern, High quality off)\n", 100.0 * sum / count, 100.0 * worstLoad);
     CHECK(sum / count < 0.35);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// Kitchen: drift, roll, tempo-synced drag files, LISTEN steering
+// ---------------------------------------------------------------------------------------------------------------------------
+namespace
+{
+}
+
+DTEST(roll_ignores_choices_and_is_reproducible)
+{
+    setupEnv();
+    float fa[2], fb[2], sp[2];
+    for (int k = 0; k < 2; ++k)
+    {
+        CandyProcessor p(false); prepare(p, 44100.0, 512);
+        setP(p, pid::famA, 1); setP(p, pid::famB, 0); setP(p, pid::keepSkel, 1);      // the user's choice, which ROLL must ignore
+        const auto before = p.mainSound().id;
+        p.rollWith(987654u);
+        fa[k] = getP(p, pid::famA); fb[k] = getP(p, pid::famB); sp[k] = getP(p, pid::spice);
+        CHECK(getP(p, pid::keepSkel) < 0.5f);
+        CHECK(waitFor([&] { return p.candidates().size() >= 5 && p.mainSound().id != before; }));
+        CHECK(p.mainSound().activeLayerCount() >= 1);
+    }
+    CHECK(fa[0] == fa[1] && fb[0] == fb[1] && sp[0] == sp[1]);
+}
+
+DTEST(kitchen_generation_uses_family_fusion_and_keep)
+{
+    setupEnv();
+    CandyProcessor p(false); prepare(p, 44100.0, 512);
+    setP(p, pid::famA, 2); setP(p, pid::famB, 5);                                      // CHIME x MOSS
+    p.generate(); CHECK(waitFor([&] { return p.candidates().size() >= 8; }));
+    const auto cs = p.candidates(); std::set<int> fam; for (auto& c : cs) fam.insert(familyOfCategory(c.dna.category));
+    CHECK(cs.size() >= 8);
+    CHECK_MSG(fam.size() == 1, "all candidates start from family A");
+    p.selectCandidate(0); waitFor([&] { return ! p.busy(); }, 2000);
+    const auto base = p.mainSound();
+    setP(p, pid::keepSkel, 1); setP(p, pid::spice, 0);
+    p.generate(); CHECK(waitFor([&] { auto v = p.candidates(); return v.size() >= 4 && v[0].dna.id != cs[0].dna.id && v[0].dna.name.contains("~"); }));
+    for (auto& c : p.candidates()) { CHECK(c.dna.activeLayerCount() == base.activeLayerCount()); for (int l = 0; l < kMaxLayers; ++l) CHECK(c.dna.layers[(size_t) l].engine == base.layers[(size_t) l].engine); }
+}
+
+DTEST(synced_dish_is_dragged_out_at_exactly_the_window_length)
+{
+    setupEnv();
+    CandyProcessor p(false); prepare(p, 44100.0, 512);
+    juce::AudioFormatManager fm; fm.registerBasicFormats();
+    struct Case { int idx; double beats; };
+    for (Case c : { Case { 1, 0.25 }, Case { 3, 1.0 }, Case { 5, 4.0 } })                // 1/16, 1/4, 1 bar
+    {
+        setP(p, pid::lenSync, (float) c.idx); setP(p, pid::anaBpm, 120.0f);
+        CHECK(std::abs(p.syncWindowMs() - c.beats * 500.0) < 0.5);
+        ExportFormat f; f.sampleRate = 48000.0; f.bitDepth = 24;
+        const auto file = p.makeDragFile(CandyProcessor::ExportWhat::OneShot, f);
+        CHECK(file.existsAsFile());
+        std::unique_ptr<juce::AudioFormatReader> rd(fm.createReaderFor(file));
+        CHECK(rd != nullptr);
+        if (rd) CHECK_MSG(std::abs((double) rd->lengthInSamples - c.beats * 0.5 * 48000.0) <= 1.0, "length " + std::to_string(rd->lengthInSamples));
+    }
+    setP(p, pid::lenSync, 0); CHECK(p.syncWindowMs() == 0.0);                           // Free: natural length again
+}
+
+DTEST(listen_aims_generation_at_the_quietest_band_of_the_track)
+{
+    setupEnv();
+    CandyProcessor p(true); setP(p, pid::capBars, 0); setP(p, pid::seqOn, 0); prepare(p, 44100.0, 512);
+    const double sr = 44100.0; const int N = (int) (4 * 4 * 0.5 * sr); std::vector<float> x((size_t) N, 0.0f);
+    for (int b = 0; b < 16; ++b) { const int k = (int) (b * 0.5 * sr); for (int i = 0; i < 6000 && k + i < N; ++i) x[(size_t) (k + i)] += 0.8f * std::sin(6.28318f * 55.0f * (float) i / (float) sr) * std::exp(-(float) i / 1500.0f); }
+    p.listen(); CHECK(p.captureState() == 1); CHECK(getP(p, pid::listenOn) > 0.5f);
+    TestPlayHead ph; ph.bpm = 120.0; juce::AudioBuffer<float> buf(2, 512); juce::MidiBuffer midi; p.setPlayHead(&ph);
+    int pos = 0, guard = 0;
+    while (p.captureState() != 3 && guard++ < 2000)
+    {
+        for (int i = 0; i < 512; ++i) { const float v = pos + i < N ? x[(size_t) (pos + i)] : 0.0f; buf.setSample(0, i, v); buf.setSample(1, i, v); }
+        ph.ppq = (double) pos / sr * 2.0; p.processBlock(buf, midi); pos += 512;
+    }
+    p.setPlayHead(nullptr);
+    CHECK(waitFor([&] { return p.analysis() != nullptr; }));
+    // LISTEN placed events by itself and started a generation
+    CHECK(waitFor([&] { auto pt = p.pattern(); return pt && ! pt->events.empty() && p.candidates().size() >= 5; }));
+    int gap = -1; const auto gs = p.kitchenSettings(&gap);
+    CHECK(gap >= 3 && gap <= 6);
+    const auto a = p.analysis(); for (int b = 3; b <= 6; ++b) CHECK(a->bandDb[(size_t) gap] <= a->bandDb[(size_t) b] + 1e-4f);
+    setP(p, pid::listenOn, 0); CHECK(std::abs(p.kitchenSettings().brightness - 0.5f) < 1e-3f);        // steering only while LISTEN is on
+    CHECK(std::abs(gs.brightness - 0.5f) > 0.02f || gap == 4);
 }

@@ -18,3 +18,12 @@ Gain staging: generator targets about -6 dBFS peak (rejects sounds that would ne
 
 ## Files
 `.dalicandy` = JSON; `kPresetVersion = 2`; migration in `migratePresetVar`; parameter IDs are versioned (`ParameterID{id, 1}`) and must never be renamed. Plug-in state = APVTS XML + preset JSON + UI state.
+
+## Kitchen layer (families, fusion, drift, listen)
+* `Generator/Families.*`: six families map archetypes by category (`familyOfCategory`); `fusionName(a,b)` names the 15 pairs. `GenSettings` carries `familyA/familyB/spice/syncLength` (-1 = classic Category mode, so the old GENERATE page and all older tests are unchanged).
+* `CandyGenerator::generateOne`: pick an archetype from family A (and B for a fusion) -> `buildRaw` (build + modulation + FX) -> `fuse` (layers of both, <= 4; routes re-targeted to the new layer slots; B's modulators re-allocated to free LFO / MSEG / S&H / chaos slots of the same kind, routes without a free slot are dropped; FX halfway) -> `applySpice` -> render / analyse / gain-stage -> `fitLength` for synced windows (rescales envelopes, sends and tails up to 5 passes; rejects if the audible length ends outside 50-130 % of the window).
+* KEEP = `CandyGenerator::variations` -> `mutate(..., keepSkeleton=true)` (parameters, small pitch moves, seeds, LFO rates, route depths only).
+* DRIFT lives in `CandyEngine::startVoice`: three mean-reverting random walks (pitch, length, 16 parameter offsets) advanced once per event with a private deterministic `Rng` that `reset()` re-seeds; 0 = off. Because it is advanced at event time inside the engine it is independent of the host block size (tested).
+* Synced length: `CandyProcessor::syncWindowMs()` = beats x 60000 / host BPM (`hostBpm_` is published from `processBlock`). `ExportFormat::fitMs` makes the one-shot renderer cut (8 ms fade) or zero-pad to exactly that many samples.
+* ROLL / LISTEN are processor methods (`rollWith(seed)`, `listen()`), results arrive through the same mailbox as every other job. LISTEN sets `listenPending_`; when the analysis arrives the pattern is placed from its suggestions and `generate()` runs with `kitchenSettings()` steering brightness to the quietest band.
+* GUI: `UI/KitchenPage.cpp` (flavour matrix, plates, drag pads, on-screen keys via `CandyProcessor::keyboardState`, which `processBlock` merges into the MIDI buffer).

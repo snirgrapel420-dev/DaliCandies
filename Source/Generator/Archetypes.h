@@ -15,6 +15,7 @@ struct Intent
     float lengthMs = 600.0f;
     int   root = 9, scale = 1;
     Category category = Category::MicroDetails;
+    bool sync = false;                // tempo-synced length: lengthMs is the window itself (no archetype length factor)
     static Intent from(const GenSettings& g);
 };
 

@@ -20,6 +20,7 @@ struct ExportFormat
     QualityMode quality = QualityMode::High;
     float  velocity = 0.9f;
     float  tailMs = -1.0f;                 // < 0 automatic
+    float  fitMs = 0.0f;                   // > 0: one-shots are cut / padded to exactly this length (tempo-synced dishes)
 };
 
 struct ExportSource

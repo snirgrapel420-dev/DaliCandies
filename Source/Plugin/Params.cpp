@@ -1,5 +1,6 @@
 #include "Params.h"
 #include "Generator/Scale.h"
+#include "Generator/Families.h"
 
 namespace dali
 {
@@ -29,6 +30,17 @@ std::unique_ptr<AudioParameterFloat> flt(const char* id, const char* name, float
 
 const char* rootNoteName(int i) { return noteName(i); }
 
+const char* lenSyncName(int i)
+{
+    static const char* n[kNumLenSync] = { "Free", "1/16", "1/8", "1/4", "1/2", "1 bar", "2 bars", "4 bars" };
+    return n[std::clamp(i, 0, kNumLenSync - 1)];
+}
+double lenSyncBeats(int i)
+{
+    static const double b[kNumLenSync] = { 0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0 };     // 4/4
+    return b[std::clamp(i, 0, kNumLenSync - 1)];
+}
+
 AudioProcessorValueTreeState::ParameterLayout createParameterLayout(bool isFx)
 {
     AudioProcessorValueTreeState::ParameterLayout l;
@@ -41,6 +53,11 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout(bool isFx)
         StringArray cats; for (int i = 0; i < kNumCategories; ++i) cats.add(categoryName((Category) i));
         g->addChild(choice(category, "Category", cats, 0));
         g->addChild(pct(negSpace, "Negative Space", 50));
+        { StringArray fa { "Off (Category)" }, fb { "None" }; for (int i = 0; i < kNumFamilies; ++i) { fa.add(familyName(i)); fb.add(familyName(i)); }
+          g->addChild(choice(famA, "Family", fa, 0), choice(famB, "Fusion Family", fb, 0)); }
+        { StringArray ls; for (int i = 0; i < kNumLenSync; ++i) ls.add(lenSyncName(i)); g->addChild(choice(lenSync, "Synced Length", ls, 0)); }
+        g->addChild(pct(spice, "Spice", 0), pct(drift, "Drift", 0));
+        g->addChild(boolean(keepSkel, "Keep Skeleton", false), boolean(listenOn, "Listen", false));
         StringArray roots; for (int i = 0; i < 12; ++i) roots.add(noteName(i));
         g->addChild(choice(rootNote, "Root Note", roots, 9));
         StringArray scales; for (int i = 0; i < 6; ++i) scales.add(dali::scaleName(i));
@@ -82,7 +99,7 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout(bool isFx)
     return l;
 }
 
-GenSettings genSettingsFrom(AudioProcessorValueTreeState& s)
+GenSettings genSettingsFrom(AudioProcessorValueTreeState& s, double hostBpm)
 {
     using namespace pid;
     auto v = [&](const char* id) { return s.getRawParameterValue(id)->load(); };
@@ -91,6 +108,10 @@ GenSettings genSettingsFrom(AudioProcessorValueTreeState& s)
     g.chaos = v(chaos) * 0.01f; g.brightness = v(brightness) * 0.01f; g.musicality = v(musicality) * 0.01f;
     g.lengthMode = (int) v(lengthMode); g.customLengthMs = v(lengthMs); g.category = (Category) std::clamp((int) v(category), 0, kNumCategories - 1);
     g.negSpaceSensitivity = v(negSpace) * 0.01f; g.rootNote = (int) v(rootNote); g.scale = (int) v(scale);
+    g.familyA = (int) v(famA) - 1; g.familyB = (int) v(famB) - 1; g.spice = v(spice) * 0.01f;
+    if (g.familyA < 0) g.familyB = -1;
+    const double beats = lenSyncBeats((int) v(lenSync));
+    if (beats > 0.0 && hostBpm > 0.0) { g.syncLength = true; g.lengthMode = 3; g.customLengthMs = (float) std::clamp(beats * 60000.0 / hostBpm, 20.0, 20000.0); }
     return g;
 }
 

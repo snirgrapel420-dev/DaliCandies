@@ -7,9 +7,9 @@
 
 It behaves as an effect while its main audio input is connected and as an instrument when the host switches that input off (as most hosts do on instrument tracks). The plug-in declares the VST3 categories `Instrument|Synth|Fx`; **how a particular host lists a plug-in that is both (instrument list, effect list or both) is decided by the host and was not tested** - see `Docs/KNOWN_LIMITATIONS.md`.
 
-It contains: 6 synthesis engines (MicroSynth, Resonator, Granular, Glitch, Spectral/STFT, Noise & Motion), up to 4 layers per sound, an intelligent generate pipeline (34 archetypes -> render -> analyse -> reject -> score -> diverse selection of 8 candidates), Candy DNA with deterministic seeds (Mutate / Lock / Evolve / Breed / Recall), a 32-route modulation matrix (4 LFO, 4 MSEG, 2 S&H, 2 chaos, random walk, step, follower, transient, velocity, note, wheel, aftertouch, 4 macros), 8 sequencer modes (sample-accurate, host-synced), track analysis with an opportunity map and editable placement suggestions, a Negative Space engine, masking awareness, versioned presets (56 factory presets embedded), local taste learning, and a 5-page dark neon GUI.
+It contains: 6 synthesis engines (MicroSynth, Resonator, Granular, Glitch, Spectral/STFT, Noise & Motion), up to 4 layers per sound, an intelligent generate pipeline (34 archetypes -> render -> analyse -> reject -> score -> diverse selection of 8 candidates), Candy DNA with deterministic seeds (Mutate / Lock / Evolve / Breed / Recall), a 32-route modulation matrix (4 LFO, 4 MSEG, 2 S&H, 2 chaos, random walk, step, follower, transient, velocity, note, wheel, aftertouch, 4 macros), 8 sequencer modes (sample-accurate, host-synced), track analysis with an opportunity map and editable placement suggestions, a Negative Space engine, masking awareness, versioned presets (56 factory presets embedded), local taste learning, a simple **Kitchen** main screen (six sound families, 15 fusions, ROLL / COOK / KEEP / SPICE / DRIFT / LISTEN, tempo-synced lengths from 1/16 to 4 bars, drag-out) and the original 5 advanced pages behind an ADVANCED button, all in a dark neon GUI.
 
-> **Status in one paragraph.** Everything in this repository was built and tested on **Linux x86_64 (GCC 13)** only. The plug-in builds, passes **pluginval 1.0.4 at strictness 10 with GUI tests** (under xvfb), and 64 unit/integration test cases (also clean under ASan + UBSan). **The Windows build and Ableton Live have not been built, loaded or tested** - see `Docs/CONTINUATION.md` for the exact procedure. Read `Docs/KNOWN_LIMITATIONS.md` before relying on anything.
+> **Status in one paragraph.** Everything in this repository was built and tested on **Linux x86_64 (GCC 13)** only. The plug-in builds, passes **pluginval 1.0.4 at strictness 10 with GUI tests** (under xvfb), and 76 unit/integration test cases (also clean under ASan + UBSan). **The Windows build and Ableton Live have not been built, loaded or tested** - see `Docs/CONTINUATION.md` for the exact procedure. Read `Docs/KNOWN_LIMITATIONS.md` before relying on anything.
 
 ## Documentation
 
@@ -21,7 +21,7 @@ It contains: 6 synthesis engines (MicroSynth, Resonator, Granular, Glitch, Spect
 | `Docs/TEST_RESULTS.md` | What was run, with real results and logs in `Docs/results/` |
 | `Docs/KNOWN_LIMITATIONS.md` | Honest list of gaps and unverified areas |
 | `Docs/CONTINUATION.md` | How to continue: Windows/Ableton verification checklist, open work |
-| `Docs/screenshots/` | Headless renders of the five pages (both plug-ins) |
+| `Docs/screenshots/` | Headless renders: the Kitchen (page 1) and the five advanced pages |
 
 ## Quick start (Linux)
 

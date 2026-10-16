@@ -1,5 +1,5 @@
 #pragma once
-// DaliCandy plug-in editor: header (brand, preset browser, page tabs, meter), five pages, footer.
+// DaliCandy plug-in editor: header (brand, preset browser, page tabs, meter), the Kitchen plus five advanced pages, footer.
 #include "Pages.h"
 
 namespace dali::ui
@@ -29,8 +29,10 @@ private:
     CandyProcessor& proc;
     NeonLookAndFeel laf;
     juce::TooltipWindow tooltips { this, 500 };
-    std::array<std::unique_ptr<PageBase>, 5> pages;
-    std::array<juce::TextButton, 5> tabs;
+    std::array<std::unique_ptr<PageBase>, 6> pages;      // 0 = Kitchen (simple main screen), 1..5 = advanced pages
+    std::array<juce::TextButton, 6> tabs;
+    juce::TextButton advanced { "ADVANCED" }; bool advancedOn = false;
+    void setAdvanced(bool on);
     int page = 0;
     juce::TextButton prev { "<" }, next { ">" }, presetName, save { "Save" }, fav { "Fav" }, rnd { "Random" };
     juce::TextEditor search;
