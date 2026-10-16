@@ -28,7 +28,13 @@ int main(int argc, char** argv)
     const juce::File out = juce::File::getCurrentWorkingDirectory().getChildFile(argc > 1 ? argv[1] : "shots");
     out.createDirectory();
     auto tmp = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("dalicandy_shots_data");
-    tmp.createDirectory(); ::setenv("DALICANDY_DATA_DIR", tmp.getFullPathName().toRawUTF8(), 1);
+    tmp.createDirectory(); 
+#if JUCE_WINDOWS
+    _putenv_s("DALICANDY_DATA_DIR", tmp.getFullPathName().toRawUTF8());
+#else
+    ::setenv("DALICANDY_DATA_DIR", tmp.getFullPathName().toRawUTF8(), 1);
+#endif
+
 
     int failures = 0;
     for (int fx = 1; fx < 2; ++fx)   // the shipping, unified plug-in
