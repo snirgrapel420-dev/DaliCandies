@@ -33,12 +33,16 @@ struct TrackAnalysis
     float rmsDb = -120, peakDb = -120, dynamicDensity = 0, rhythmicActivity = 0, centroidHz = 0;
     std::array<float, kNumBands> bandDb {};              // average level per band (dB)
     std::vector<Suggestion> suggestions;
+    int   keyRoot = -1; bool keyMinor = true; float keyConfidence = 0.0f;   // detected key (keyRoot < 0 = unknown)
     uint32_t revision = 0;
 };
 
 // Heavy analysis.  `cancel` is polled regularly; returns an invalid analysis if cancelled.
 TrackAnalysis analyzeTrack(const float* mono, int n, double sampleRate, double bpm, int beatsPerBar,
                            const std::atomic<bool>* cancel = nullptr, const std::function<void(float)>& progress = {});
+
+// Estimates the key from the pitched content (Goertzel chroma + Krumhansl profiles).  Cheap enough for the worker thread.
+void detectKey(TrackAnalysis& a, const float* mono, int n);
 
 // (Re)computes the opportunity map from the analysis features.  Cheap.
 void computeOpportunity(TrackAnalysis& a);

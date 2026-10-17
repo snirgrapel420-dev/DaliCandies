@@ -4,7 +4,7 @@ Raw logs: `Docs/results/`. Date of the final run: 2026-10-16.
 
 | What | How | Result |
 |---|---|---|
-| Unit / integration tests | `DaliCandyTests` (84 cases, 706,755 checks) | **84 passed, 0 failed checks** (`unit-tests.log`) |
+| Unit / integration tests | `DaliCandyTests` (87 cases, 706,779 checks) | **87 passed, 0 failed checks** (`unit-tests.log`) |
 | Same tests under AddressSanitizer + UBSan + LeakSanitizer | `-DDALI_SANITIZE=ON` build, `detect_leaks=1` | **81 passed, 0 sanitizer reports** (run before the last LISTEN fixes; the 3 newest tests were not run under ASan) (`asan-ubsan-tests.log`); the allocation-counting test is skipped there because it replaces `operator new` |
 | pluginval 1.0.4, the single `DaliCandy.vst3` | strictness 10, in-process, GUI tests on, xvfb | **SUCCESS** (`pluginval-DaliCandy.log`) |
 | Headless editor smoke test (unified plug-in) | `DaliCandyEditorShots`: generate, import track, create editor, show the Kitchen and the 5 advanced pages, edit, resize 1040x700..1900x1200 | **PASSED**, 6 screenshots (`Docs/screenshots/unified_page*.png`, `editor-smoke.log`) |

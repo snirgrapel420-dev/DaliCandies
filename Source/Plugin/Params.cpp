@@ -58,9 +58,10 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout(bool isFx)
         { StringArray ls; for (int i = 0; i < kNumLenSync; ++i) ls.add(lenSyncName(i)); g->addChild(choice(lenSync, "Synced Length", ls, 0)); }
         g->addChild(pct(spice, "Spice", 0), pct(drift, "Drift", 0));
         g->addChild(boolean(keepSkel, "Keep Skeleton", false), boolean(listenOn, "Listen", false));
+        g->addChild(boolean(autoListen, "Auto Listen", isFx));
         StringArray roots; for (int i = 0; i < 12; ++i) roots.add(noteName(i));
         g->addChild(choice(rootNote, "Root Note", roots, 9));
-        StringArray scales; for (int i = 0; i < 6; ++i) scales.add(dali::scaleName(i));
+        StringArray scales; for (int i = 0; i < 7; ++i) scales.add(dali::scaleName(i));
         g->addChild(choice(scale, "Scale", scales, 1));
         l.add(std::move(g)); }
     {   auto g = std::make_unique<AudioProcessorParameterGroup>("seq", "Sequence", "|");

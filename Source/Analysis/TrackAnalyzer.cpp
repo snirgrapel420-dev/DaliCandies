@@ -22,6 +22,45 @@ void normalise(std::vector<float>& v, float p = 0.95f)
 bool cancelled(const std::atomic<bool>* c) { return c != nullptr && c->load(std::memory_order_relaxed); }
 }
 
+
+void detectKey(TrackAnalysis& a, const float* x, int n)
+{
+    a.keyRoot = -1; a.keyConfidence = 0.0f; if (x == nullptr || n < 8192) return;
+    const double sr = a.sampleRate; const int N = 8192; std::array<double, 12> chroma {}; chroma.fill(0.0);
+    std::vector<float> win((size_t) N); for (int i = 0; i < N; ++i) win[(size_t) i] = 0.5f - 0.5f * std::cos(6.2831853f * (float) i / (float) (N - 1));
+    struct G { double coeff; int pc; }; std::vector<G> gs;
+    for (int m = 36; m <= 84; ++m) { const double f = 440.0 * std::pow(2.0, (m - 69) / 12.0); if (f > sr * 0.45) continue; gs.push_back({ 2.0 * std::cos(6.283185307 * f / sr), m % 12 }); }
+    const int hop = std::max(N, n / 40);                                           // at most ~40 frames, spread over the whole window
+    for (int pos = 0; pos + N <= n; pos += hop)
+    {
+        double energy = 0.0; for (int i = 0; i < N; i += 8) energy += (double) x[pos + i] * x[pos + i]; if (energy < 1.0e-6) continue;
+        std::array<double, 12> fr {}; fr.fill(0.0);
+        for (auto& g : gs)
+        {
+            double s1 = 0, s2 = 0; for (int i = 0; i < N; ++i) { const double s = (double) x[pos + i] * win[(size_t) i] + g.coeff * s1 - s2; s2 = s1; s1 = s; }
+            fr[(size_t) g.pc] += std::sqrt(std::max(0.0, s1 * s1 + s2 * s2 - g.coeff * s1 * s2));
+        }
+        double mx = 0; for (double v : fr) mx = std::max(mx, v); if (mx <= 0) continue;
+        for (int i = 0; i < 12; ++i) chroma[(size_t) i] += fr[(size_t) i] / mx;
+    }
+    static const double maj[12] = { 6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88 };
+    static const double mnr[12] = { 6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17 };
+    auto corr = [&](const double* prof, int rot)
+    {
+        double mc = 0, mp = 0; for (int i = 0; i < 12; ++i) { mc += chroma[(size_t) i]; mp += prof[i]; } mc /= 12; mp /= 12;
+        double num = 0, dc = 0, dp = 0; for (int i = 0; i < 12; ++i) { const double c = chroma[(size_t) ((i + rot) % 12)] - mc, p = prof[i] - mp; num += c * p; dc += c * c; dp += p * p; }
+        return dc > 0 && dp > 0 ? num / std::sqrt(dc * dp) : 0.0;
+    };
+    double best = -2, second = -2; int bRoot = -1; bool bMinor = true;
+    for (int r = 0; r < 12; ++r) for (int m = 0; m < 2; ++m)
+    {
+        const double c = corr(m ? mnr : maj, r);
+        if (c > best) { second = best; best = c; bRoot = r; bMinor = m == 1; } else if (c > second) second = c;
+    }
+    if (bRoot < 0 || best < 0.45) return;
+    a.keyRoot = bRoot; a.keyMinor = bMinor; a.keyConfidence = (float) std::clamp(best - 0.25 * std::max(0.0, second), 0.0, 1.0);
+}
+
 TrackAnalysis analyzeTrack(const float* mono, int n, double sr, double bpm, int beatsPerBar,
                            const std::atomic<bool>* cancel, const std::function<void(float)>& progress)
 {
@@ -137,6 +176,7 @@ TrackAnalysis analyzeTrack(const float* mono, int n, double sr, double bpm, int 
         a.phrasePos[(size_t) s] = within / 8.0f;
     }
     computeOpportunity(a);
+    detectKey(a, mono, n);
     a.valid = true; a.revision = 1;
     if (progress) progress(1.0f);
     return a;

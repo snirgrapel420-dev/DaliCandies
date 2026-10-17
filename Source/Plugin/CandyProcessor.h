@@ -97,8 +97,9 @@ public:
     void generate();                                         // fresh dishes (or variations of the current one when Keep Skeleton is on)
     void roll();                                             // ignores the family choice: random family / fusion / settings, then picks one at random
     void rollWith(uint32_t seed);
-    void listen();                                           // analyse what the plug-in has been hearing (no arming); no audio -> asks for a WAV
+    void listen();                                           // manual: analyse now                                           // analyse what the plug-in has been hearing (no arming); no audio -> asks for a WAV
     void listenFromFile(const juce::File& f);                // LISTEN with a bounced track: analyse, cook plates for its gaps, build the pattern
+    int  heardBars() const { const double sp = 4.0 * 60.0 / std::max(20.0, ringBpm_.load()) * sr_; return sp > 0 ? (int) std::floor((double) std::min<int64_t>(ringWritten_.load(), (int64_t) ring_.size()) / sp) : 0; }
     bool takeListenNeedsFile() { return listenNeedsFile_.exchange(false); }
     float inputLevel() const { return inputLevel_.load(std::memory_order_relaxed); }   // 0..1 peak of the audio reaching the plug-in
     double heardSeconds() const { return sr_ > 0 ? (double) std::min<int64_t>(ringWritten_.load(), (int64_t) ring_.size()) / sr_ : 0.0; }
@@ -138,7 +139,7 @@ public:
     std::shared_ptr<const TrackAnalysis> analysis() const;
     void editAnalysis(const std::function<void(TrackAnalysis&)>& fn);
     void regenerateSuggestions();
-    void applySuggestionsToSequence();
+    void applySuggestionsToSequence(bool enable = true);
     MaskingReport masking() const;
     const LiveAnalyzer& live() const { return live_; }
 
@@ -216,7 +217,9 @@ private:
     TempExportFiles dragFiles_;
     std::atomic<bool> alive_ { true }; std::atomic<uint32_t> uiFlags_ { 0 };
     std::atomic<double> hostBpm_ { 120.0 }; std::atomic<bool> rollPending_ { false }, listenPending_ { false }, buildAfterCook_ { false }; uint32_t rollPick_ = 0; int lastListenPct_ = -2;
-    std::vector<float> ring_; std::atomic<int64_t> ringWritten_ { 0 }; std::atomic<double> ringEndPpq_ { -1.0 }, ringBpm_ { 120.0 }; std::atomic<float> inputLevel_ { 0.0f }; std::atomic<bool> listenNeedsFile_ { false }, hostBpmKnown_ { false };
+    std::vector<float> ring_; std::atomic<int64_t> ringWritten_ { 0 }; std::atomic<double> ringEndPpq_ { -1.0 }, ringBpm_ { 120.0 }; std::atomic<float> inputLevel_ { 0.0f }; std::atomic<bool> listenNeedsFile_ { false }, hostBpmKnown_ { false }, autoApply_ { false }, autoRunning_ { false }; std::atomic<double> analysisStartBeats_ { 0.0 }; int64_t lastAutoAt_ = -1; int autoRuns_ = 0;
+    bool startListenFromRing(bool manual);                    // snapshot the ring buffer and analyse it; false = not enough / silent (status says why)
+    void autoListenTick();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CandyProcessor)
 };

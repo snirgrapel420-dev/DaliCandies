@@ -345,7 +345,7 @@ bool GenSettings::fromVar(const juce::var& v, GenSettings& g)
     g.chaos = getF(v, "ch", .4f); g.brightness = getF(v, "br", .5f); g.musicality = getF(v, "mu", .65f); g.lengthMode = getI(v, "lm", 1);
     g.customLengthMs = getF(v, "cl", 800.f); g.category = (Category) std::clamp(getI(v, "cat", 0), 0, kNumCategories - 1);
     g.negSpaceSensitivity = getF(v, "ns", .5f);
-    g.rootNote = std::clamp(getI(v, "root", 9), 0, 11); g.scale = std::clamp(getI(v, "scale", 1), 0, 5);
+    g.rootNote = std::clamp(getI(v, "root", 9), 0, 11); g.scale = std::clamp(getI(v, "scale", 1), 0, 6);
     g.familyA = std::clamp(getI(v, "fa", -1), -1, 5); g.familyB = std::clamp(getI(v, "fb", -1), -1, 5); g.spice = clamp01(getF(v, "spice", 0.0f));
     g.syncLength = getI(v, "sync", 0) != 0;
     return true;

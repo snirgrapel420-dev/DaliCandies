@@ -540,6 +540,7 @@ void CandyProcessor::timerCallback()
         else
         beginAnalysis(std::move(mono), cap->sampleRate, cap->bpm, cap->beatsPerBar);
     }
+    autoListenTick();
     if (pendingFlags_ != 0) { uiFlags_ |= pendingFlags_; sendChangeMessage(); pendingFlags_ = 0; }
     updateAdaptive();
 }
@@ -638,32 +639,64 @@ void CandyProcessor::rollWith(uint32_t seed)
     generate();
 }
 
-void CandyProcessor::listen()
+bool CandyProcessor::startListenFromRing(bool manual)
 {
-    auto say = [this](const juce::String& s) { { const juce::ScopedLock sl(lock_); status_ = s; } flagChange(kChStatus); };
-    const int64_t written = ringWritten_.load(std::memory_order_acquire);
-    const int64_t rs = (int64_t) ring_.size();
+    auto say = [&](const juce::String& s) { if (! manual) return; { const juce::ScopedLock sl(lock_); status_ = s; } flagChange(kChStatus); };
+    const int64_t written = ringWritten_.load(std::memory_order_acquire), rs = (int64_t) ring_.size();
     const double bpm = std::max(20.0, ringBpm_.load()); const double bpb = 4.0;
     const int barsChoice[] = { 4, 8, 16, 32 };
     const int wantBars = barsChoice[std::clamp((int) apvts.getRawParameterValue(pid::capBars)->load(), 0, 3)];
     const double spBar = bpb * 60.0 / bpm * sr_;
     if (written < (int64_t) (2.0 * spBar))
-    {   // the plug-in has not heard enough: typical for an instrument track, where the host gives no audio
-        setParam(apvts, pid::listenOn, 1.0f); listenPending_ = true; listenNeedsFile_ = true;
-        say("No track audio reaches the plug-in (an instrument track gets none), so choose the track as a WAV file...");
-        return;
+    {
+        say("Nothing to listen to yet. Put DaliCandy as an effect on the audio track (or on the master), press Play and let it run a few bars - it then listens by itself");
+        return false;
     }
     const double endPpq = ringEndPpq_.load();
     int64_t end = written; if (endPpq >= 0.0) end -= (int64_t) std::llround(std::fmod(endPpq, bpb) * 60.0 / bpm * sr_);      // stop on the last bar line
-    const int heardBars = (int) std::floor((double) std::min<int64_t>(end, rs) / spBar);
-    const int useBars = std::min(wantBars, heardBars);
-    if (useBars < 2) { say("Heard only " + juce::String(heardBars) + " bar(s) so far: let the track play a few more bars, then press LISTEN again"); return; }
+    const int heardBarsN = (int) std::floor((double) std::min<int64_t>(end, rs) / spBar);
+    const int useBars = std::min(wantBars, heardBarsN);
+    if (useBars < (manual ? 2 : 4)) { say("Heard only " + juce::String(heardBarsN) + " bar(s) so far: let the track play a few more bars"); return false; }
     const int64_t len = (int64_t) std::llround((double) useBars * spBar);
     std::vector<float> mono((size_t) len); float peak = 0.0f;
     for (int64_t i = 0; i < len; ++i) { const float v = ring_[(size_t) (((end - len + i) % rs + rs) % rs)]; mono[(size_t) i] = v; peak = std::max(peak, std::abs(v)); }
-    if (peak < 0.003f) { say("LISTEN heard silence: the track audio is not reaching the plug-in. Use DaliCandy as an effect on the track, or drop a WAV of the track onto this window"); return; }
-    setParam(apvts, pid::listenOn, 1.0f); listenPending_ = true;
+    if (peak < 0.003f) { say("LISTEN heard silence: no track audio reaches the plug-in. Use it as an effect on the audio track or the master"); return false; }
+    analysisStartBeats_.store(endPpq >= 0.0 ? std::max(0.0, (endPpq - std::fmod(endPpq, bpb)) - (double) useBars * bpb) : 0.0);
     beginAnalysis(std::move(mono), sr_, bpm, 4);
+    return true;
+}
+
+void CandyProcessor::listen()
+{
+    setParam(apvts, pid::listenOn, 1.0f);
+    listenPending_ = true;
+    if (! startListenFromRing(true)) listenPending_ = false;
+    else lastAutoAt_ = ringWritten_.load();
+}
+
+// Automatic mode: no button.  Once about four bars of the track have been heard it analyses them, cooks plates for the dead parts
+// and builds the pattern; afterwards it re-reads the track every eight bars and rebuilds the pattern so it follows the song.
+void CandyProcessor::autoListenTick()
+{
+    if (! isFx_ || ! prepared_ || apvts.getRawParameterValue(pid::autoListen)->load() < 0.5f || busy() || autoRunning_.load()) return;
+    const int64_t w = ringWritten_.load(std::memory_order_acquire); if (w <= 0) return;
+    const double spBar = 4.0 * 60.0 / std::max(20.0, ringBpm_.load()) * sr_;
+    const int bars = heardBars();
+    if (lastAutoAt_ < 0)
+    {
+        if (bars < 4)
+        {
+            static thread_local int shown = -1; if (bars != shown) { shown = bars; { const juce::ScopedLock sl(lock_); status_ = "Auto-listening: " + juce::String(bars) + " of 4 bars heard..."; } flagChange(kChStatus); }
+            return;
+        }
+    }
+    else if ((double) (w - lastAutoAt_) < 8.0 * spBar) return;
+    lastAutoAt_ = w;
+    const bool first = autoRuns_ == 0;
+    if (first) { setParam(apvts, pid::listenOn, 1.0f); listenPending_ = true; } else autoApply_ = true;
+    autoRunning_ = true;
+    if (startListenFromRing(false)) ++autoRuns_;
+    else { autoRunning_ = false; listenPending_ = false; autoApply_ = false; }
 }
 
 void CandyProcessor::listenFromFile(const juce::File& f)
@@ -815,14 +848,16 @@ void CandyProcessor::beginAnalysis(std::vector<float> mono, double sr, double bp
     {
         std::atomic<bool> cancelFlag { false };
         auto a = analyzeTrack(mono.data(), (int) mono.size(), sr, bpm, beats, &cancel_, [this](float p) { progress_ = p; });
-        if (! a.valid || cancel_ || ! alive_) { postToMessageThread([this] { { const juce::ScopedLock sl(lock_); status_ = "Analysis cancelled or failed"; } flagChange(kChStatus); }); return; }
+        if (! a.valid || cancel_ || ! alive_) { autoRunning_ = false; postToMessageThread([this] { { const juce::ScopedLock sl(lock_); status_ = "Analysis cancelled or failed"; } flagChange(kChStatus); }); return; }
         generateSuggestions(a, gs.density, gs.negSpaceSensitivity, seed);
         auto shared = std::make_shared<const TrackAnalysis>(std::move(a));
         postToMessageThread([this, shared]
         {
             { const juce::ScopedLock sl(lock_); analysis_ = shared; status_ = "Analysis ready: " + juce::String(shared->bars) + " bars, " + juce::String((int) shared->suggestions.size()) + " suggestions"; }
             updateAdaptive(); flagChange(kChAnalysis | kChStatus);
+            autoRunning_ = false;
             if (listenPending_.exchange(false)) { buildAfterCook_ = true; generate(); }
+            else if (autoApply_.exchange(false)) applySuggestionsToSequence(false);
         });
     });
 }
@@ -841,7 +876,7 @@ void CandyProcessor::regenerateSuggestions()
     editAnalysis([&](TrackAnalysis& a) { computeOpportunity(a); generateSuggestions(a, gs.density, gs.negSpaceSensitivity, seed); });
 }
 
-void CandyProcessor::applySuggestionsToSequence()
+void CandyProcessor::applySuggestionsToSequence(bool enable)
 {
     auto a = analysis(); if (a == nullptr) return;
     std::vector<PaletteEntry> pal;
@@ -849,20 +884,30 @@ void CandyProcessor::applySuggestionsToSequence()
         for (int i = 0; i < kNumSoundSlots; ++i) if (preset_.slotUsed[(size_t) i])
         {   const auto& d = preset_.slots[(size_t) i]; PaletteEntry e; e.slot = i; e.bands = d.spectral.bands; e.durationMs = std::max(20.0f, d.durationMs); e.role = d.role; pal.push_back(e); } }
     const auto gs = genSettingsFrom(apvts); const SeqConfig cfg = seqConfig();
-    ContextOptions o; o.variety = apvts.getRawParameterValue(pid::variety)->load() * 0.01f; o.velBase = cfg.velBase; o.velRange = cfg.velRange; o.pitchVariation = cfg.pitchVariation;
-    o.rootNote = gs.rootNote; o.scale = gs.scale; o.musicality = gs.musicality; o.seed = hashCombine(0xBEEF, genCounter_++);
+    if (a->keyRoot >= 0 && a->keyConfidence >= 0.5f)
+    {   // pitched candy follows the key of the track
+        setParam(apvts, pid::rootNote, (float) a->keyRoot); setParam(apvts, pid::scale, a->keyMinor ? 0.0f : 6.0f);
+    }
+    const auto gs2 = genSettingsFrom(apvts);
+    ContextOptions o; o.amount = gs2.density; o.variety = apvts.getRawParameterValue(pid::variety)->load() * 0.01f; o.velBase = cfg.velBase; o.velRange = cfg.velRange; o.pitchVariation = cfg.pitchVariation;
+    o.rootNote = gs2.rootNote; o.scale = gs2.scale; o.musicality = gs.musicality; o.seed = hashCombine(0xBEEF, genCounter_++);
     ContextReport rep; auto ev = buildContextEvents(*a, pal, o, &rep);
+    {   // the pattern loops over the analysed window: line it up with where that window sat in the song
+        const double len = (double) std::clamp(a->bars, 1, 32) * 4.0, shift = std::fmod(analysisStartBeats_.load(), len);
+        if (shift > 1.0e-6) for (auto& e : ev) e.position = std::fmod(e.position + shift, len);
+        std::stable_sort(ev.begin(), ev.end(), [](const SeqEvent& x, const SeqEvent& y) { return x.position < y.position; });
+    }
     if (ev.empty())
     {   // the track has no real gap for candy: add nothing rather than a fill that is not needed
         { const juce::ScopedLock sl(lock_); status_ = "Your track is already full: no gap is big enough for candy, so nothing was added (raise AMOUNT or analyse a sparser section)"; }
         flagChange(kChStatus); return;
     }
     setParam(apvts, pid::seqBars, (float) std::clamp(a->bars, 1, 32));
-    { const juce::ScopedLock sl(lock_); preset_.seq.events = ev; preset_.seq.bars = std::clamp(a->bars, 1, 32); preset_.seq.freezeAll = true; preset_.seq.enabled = true; }
-    setParam(apvts, pid::seqFreeze, 1.0f); setParam(apvts, pid::seqOn, 1.0f);
+    { const juce::ScopedLock sl(lock_); preset_.seq.events = ev; preset_.seq.bars = std::clamp(a->bars, 1, 32); preset_.seq.freezeAll = true; if (enable) preset_.seq.enabled = true; }
+    setParam(apvts, pid::seqFreeze, 1.0f); if (enable) setParam(apvts, pid::seqOn, 1.0f);
     seqDirty_ = false; rebuildPatternNow(false);
     int used = 0; for (int n : rep.perSlot) used += n > 0 ? 1 : 0;
-    const juce::ScopedLock sl(lock_); status_ = "Placed " + juce::String((int) ev.size()) + " events in the gaps of the track using " + juce::String(used) + " different sound(s)"
+    const juce::ScopedLock sl(lock_); status_ = juce::String(a->keyRoot >= 0 && a->keyConfidence >= 0.5f ? "Key " + juce::String(noteName(a->keyRoot)) + (a->keyMinor ? " minor. " : " major. ") : "") + "Placed " + juce::String((int) ev.size()) + " events using " + juce::String(used) + " different sound(s)" + (rep.deadRegions > 0 ? ", " + juce::String(rep.deadFills) + " in " + juce::String(rep.deadRegions) + " dead part(s)" : juce::String()) + (rep.answers > 0 ? ", " + juce::String(rep.answers) + " answering hits" : juce::String())
                                                 + (rep.transitions > 0 ? ", " + juce::String(rep.transitions) + " transition(s) into section changes" : juce::String());
     flagChange(kChStatus | kChPattern);
 }

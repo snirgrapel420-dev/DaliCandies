@@ -60,8 +60,8 @@ private:
 
     FlavorMatrix matrix { *this };
     juce::Label inputLbl; std::unique_ptr<juce::FileChooser> listenChooser;
-    juce::TextButton roll { "ROLL" }, cook { "COOK" }, listen { "LISTEN" }, buildBtn { "BUILD" }, octDown { "<" }, octUp { ">" };
-    std::unique_ptr<ParamToggle> keep, playSeq;
+    juce::TextButton roll { "ROLL" }, cook { "COOK" }, listen { "LISTEN NOW" }, buildBtn { "BUILD" }, octDown { "<" }, octUp { ">" };
+    std::unique_ptr<ParamToggle> keep, playSeq, autoT;
     std::unique_ptr<ParamKnob> spiceKnob, driftKnob, brightKnob, motionKnob; std::unique_ptr<ParamCombo> lenBox;
     TitledPanel pMatrix { "FLAVOUR MATRIX", col::magenta }, pDish { "THE DISH", col::turquoise }, pPlates { "EIGHT PLATES", col::purple }, pKnobs { "SEASONING", col::magenta };
     WaveView dishWave; DragPad dragWav { *this, false }, dragMidi { *this, true }; Keys keys;

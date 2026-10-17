@@ -63,6 +63,7 @@ inline constexpr const char* lenSync = "lenSync";    // 0 = free (Length / Custo
 inline constexpr const char* spice = "spice";        // extra weirdness and motion
 inline constexpr const char* drift = "drift";        // evolution per repeat
 inline constexpr const char* keepSkel = "keepSkel";  // KEEP: generate variations of the current sound
+inline constexpr const char* autoListen = "autoListen";  // follow the track by itself: listen, find the dead parts, build and refresh the pattern
 inline constexpr const char* listenOn = "listenOn";  // LISTEN: steer generation toward the gaps of an analysed track
 }
 

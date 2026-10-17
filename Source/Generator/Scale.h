@@ -6,8 +6,8 @@ namespace dali
 {
 inline const char* scaleName(int s)
 {
-    static const char* n[] = { "Minor", "Phrygian", "Harmonic Minor", "Minor Pentatonic", "Phrygian Dominant", "Chromatic" };
-    return n[std::clamp(s, 0, 5)];
+    static const char* n[] = { "Minor", "Phrygian", "Harmonic Minor", "Minor Pentatonic", "Phrygian Dominant", "Chromatic", "Major" };
+    return n[std::clamp(s, 0, 6)];
 }
 inline const char* noteName(int pc)
 {
@@ -16,14 +16,15 @@ inline const char* noteName(int pc)
 }
 inline const std::array<bool, 12>& scaleMask(int s)
 {
-    static const std::array<std::array<bool, 12>, 6> m = {{
+    static const std::array<std::array<bool, 12>, 7> m = {{
         { 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0 },     // natural minor
         { 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0 },     // phrygian
         { 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1 },     // harmonic minor
         { 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0 },     // minor pentatonic
         { 1, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0 },     // phrygian dominant
-        { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 } }};
-    return m[(size_t) std::clamp(s, 0, 5)];
+        { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
+        { 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1 } }};      // major (appended: keeps saved scale indices valid)
+    return m[(size_t) std::clamp(s, 0, 6)];
 }
 // Snap a MIDI note toward the nearest note of the scale. strength 0 = untouched, 1 = fully quantised.
 inline float quantizeToScale(float midi, int root, int scale, float strength)

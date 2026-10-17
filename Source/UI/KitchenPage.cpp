@@ -176,9 +176,11 @@ KitchenPage::KitchenPage(CandyProcessor& p) : PageBase(p), keys(p)
     roll.setColour(juce::TextButton::buttonColourId, col::magenta.withAlpha(0.45f)); roll.setColour(juce::TextButton::buttonOnColourId, col::magenta);
     cook.setColour(juce::TextButton::buttonColourId, col::turquoise.withAlpha(0.3f)); listen.setColour(juce::TextButton::buttonColourId, col::purple.withAlpha(0.35f));
     roll.setTooltip("ROLL: ignores your choice. A random family or fusion, random seasoning, and one dish picked for you");
-    cook.setTooltip("COOK: eight new plates from the chosen family / fusion"); listen.setTooltip("LISTEN: analyse the last bars of audio that reached the plug-in (let the track play first), cook eight plates for its gaps and build the pattern. If no audio reaches the plug-in it asks for a WAV of the track instead.");
+    cook.setTooltip("COOK: eight new plates from the chosen family / fusion"); listen.setTooltip("LISTEN NOW: analyse the last bars heard right now, cook eight plates for the gaps of the track and build the pattern (AUTO does this by itself).");
     roll.onClick = [this] { proc.roll(); }; cook.onClick = [this] { proc.generate(); };
     listen.onClick = [this] { proc.listen(); };
+    autoT = std::make_unique<ParamToggle>(proc.apvts, pid::autoListen, "AUTO", col::turquoise); addAndMakeVisible(*autoT);
+    autoT->setTooltip("AUTO: the plug-in listens to the track by itself. After about four bars it finds the dead parts, answers the hits, fills in the key of the track, builds the pattern, and re-reads the track every eight bars. Put the plug-in as an effect on the audio track or the master.");
     buildBtn.setColour(juce::TextButton::buttonColourId, col::magenta.withAlpha(0.35f));
     buildBtn.setTooltip("BUILD: arrange the eight plates over the analysed track (gaps, free bands, transitions). Press LISTEN first if no track was analysed.");
     buildBtn.onClick = [this] { proc.buildPattern(true); };
@@ -218,7 +220,7 @@ void KitchenPage::resized()
 {
     auto r = getLocalBounds().reduced(8);
     auto top = r.removeFromTop(52);
-    roll.setBounds(top.removeFromLeft(210)); top.removeFromLeft(8); cook.setBounds(top.removeFromLeft(150)); top.removeFromLeft(8); listen.setBounds(top.removeFromLeft(120)); top.removeFromLeft(8); buildBtn.setBounds(top.removeFromLeft(100)); top.removeFromLeft(8); playSeq->setBounds(top.removeFromLeft(150).withSizeKeepingCentre(150, 26)); top.removeFromLeft(6); inputLbl.setBounds(top.removeFromLeft(150).withSizeKeepingCentre(150, 26)); top.removeFromLeft(6); status.setBounds(top);
+    roll.setBounds(top.removeFromLeft(150)); top.removeFromLeft(6); cook.setBounds(top.removeFromLeft(100)); top.removeFromLeft(6); listen.setBounds(top.removeFromLeft(130)); top.removeFromLeft(6); buildBtn.setBounds(top.removeFromLeft(80)); top.removeFromLeft(8); autoT->setBounds(top.removeFromLeft(80).withSizeKeepingCentre(80, 26)); playSeq->setBounds(top.removeFromLeft(150).withSizeKeepingCentre(150, 26)); top.removeFromLeft(6); inputLbl.setBounds(top.removeFromLeft(150).withSizeKeepingCentre(150, 26)); top.removeFromLeft(6); status.setBounds(top);
     r.removeFromTop(8);
     auto bottom = r.removeFromBottom(150); r.removeFromBottom(8);
     pPlates.setBounds(bottom);
@@ -282,14 +284,8 @@ void KitchenPage::tick()
     if (busy || progressShown > 0.0f) { progressShown = busy ? proc.progress() : 0.0f; repaint(); }
     status.setText(proc.statusText(), juce::dontSendNotification);
     { const float lv = proc.inputLevel(); const bool hear = lv > 0.003f; const double hs = proc.heardSeconds();
-      inputLbl.setText(hear ? "INPUT: hearing audio" : (hs > 0.0 ? "INPUT: quiet" : "INPUT: no audio"), juce::dontSendNotification);
+      inputLbl.setText(hear ? "INPUT: hearing audio" : (hs > 0.0 ? "INPUT: quiet" : "INPUT: no audio"), juce::dontSendNotification); (void) hs;
       inputLbl.setColour(juce::Label::textColourId, hear ? col::turquoise : col::dim); }
-    if (proc.takeListenNeedsFile() && listenChooser == nullptr)
-    {
-        listenChooser = std::make_unique<juce::FileChooser>("Choose a WAV of your track", juce::File::getSpecialLocation(juce::File::userMusicDirectory), "*.wav;*.aif;*.aiff;*.flac;*.ogg");
-        listenChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this](const juce::FileChooser& fc)
-        { auto f = fc.getResult(); listenChooser.reset(); if (f.existsAsFile()) proc.listenFromFile(f); });
-    }
     const int a = (int) proc.apvts.getRawParameterValue(famA)->load(), b = (int) proc.apvts.getRawParameterValue(famB)->load();
     if (a != shownA || b != shownB) { shownA = a; shownB = b; matrix.repaint(); updateDishLabels(); }
     if (previewDirty && --previewCountdown <= 0 && isVisible()) { previewDirty = false; renderDishWave(); updateDishLabels(); }

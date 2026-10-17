@@ -91,7 +91,7 @@ void CandyEditor::paint(juce::Graphics& g)
     g.setColour(col::magenta.withAlpha(0.7f)); g.fillRect(0.0f, h.getBottom() - 1.5f, (float) getWidth() * 0.35f, 1.5f); g.setColour(col::turquoise.withAlpha(0.7f)); g.fillRect((float) getWidth() * 0.35f, h.getBottom() - 1.5f, (float) getWidth() * 0.65f, 1.5f);
     // brand
     g.setFont(font(24.0f, true)); g.setColour(col::magenta.withAlpha(0.35f)); g.drawText("DaliCandy", 17, 7, 200, 30, juce::Justification::centredLeft); g.setColour(col::text); g.drawText("DaliCandy", 16, 6, 200, 30, juce::Justification::centredLeft);
-    g.setFont(font(11.0f, true)); g.setColour(col::turquoise); g.drawText(juce::String("DALI AUDIO  |  ") + (proc.isFx() ? "INSTRUMENT + FX" : "INSTRUMENT"), 18, 36, 200, 14, juce::Justification::centredLeft);
+    g.setFont(font(11.0f, true)); g.setColour(col::turquoise); g.drawText(juce::String("DALI AUDIO  |  ") + (proc.isFx() ? "LISTENING EAR CANDY" : "INSTRUMENT"), 18, 36, 200, 14, juce::Justification::centredLeft);
 }
 
 void CandyEditor::resized()

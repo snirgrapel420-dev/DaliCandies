@@ -1,3 +1,4 @@
 ASan+UBSan+LeakSanitizer run (RelWithDebInfo, detect_leaks=1)
-81 test cases run, 0 failed, 706754 checks, 0 failed checks (527.3 s)
+87 test cases run, 0 failed, 706776 checks, 0 failed checks (585.8 s)
 no sanitizer reports
+(run just before a label text change in CandyEditor.cpp and doc edits)

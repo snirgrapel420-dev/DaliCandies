@@ -452,7 +452,7 @@ DTEST(listen_aims_generation_at_the_quietest_band_of_the_track)
     }
     p.setPlayHead(nullptr);
     CHECK(p.inputLevel() >= 0.0f); CHECK(p.heardSeconds() > 10.0);
-    p.listen(); CHECK(getP(p, pid::listenOn) > 0.5f); CHECK(! p.takeListenNeedsFile());
+    p.listen(); CHECK(getP(p, pid::listenOn) > 0.5f);
     CHECK(waitFor([&] { return p.analysis() != nullptr; }));
     // LISTEN placed events by itself and started a generation
     CHECK(waitFor([&] { auto pt = p.pattern(); return pt && ! pt->events.empty() && p.candidates().size() >= 5; }));
@@ -511,11 +511,11 @@ DTEST(plates_become_the_palette_and_the_pattern_uses_them_in_the_gaps_of_the_tra
     TestPlayHead ph; ph.bpm = 120.0; auto r = run(p, 44100 * 8, 512, {}, &ph); CHECK(r.finite && r.peak > 0.02f);
 }
 
-DTEST(listen_without_audio_asks_for_a_wav_and_silence_is_never_analysed)
+DTEST(listen_without_audio_explains_and_silence_is_never_analysed)
 {
     setupEnv();
     // nothing has reached the plug-in (instrument track): LISTEN must say so and ask for a file instead of waiting forever
-    { CandyProcessor p(true); prepare(p, 44100.0, 512); p.listen(); CHECK(p.takeListenNeedsFile()); CHECK(p.statusText().contains("WAV")); }
+    { CandyProcessor p(true); prepare(p, 44100.0, 512); p.listen(); CHECK(p.statusText().contains("effect")); }
     // the host plays but the input is silent: reported, nothing built
     CandyProcessor p(true); setP(p, pid::capBars, 0); prepare(p, 44100.0, 512);
     juce::AudioBuffer<float> buf(2, 512); juce::MidiBuffer midi; TestPlayHead ph; ph.bpm = 120.0; p.setPlayHead(&ph);
@@ -560,4 +560,41 @@ DTEST(listen_from_a_wav_file_analyses_cooks_and_builds_the_pattern)
     CHECK(waitFor([&] { auto a = p.analysis(); auto pt = p.pattern(); return a && a->valid && pt && ! pt->events.empty() && p.candidates().size() >= 5; }));
     CHECK(getP(p, pid::seqOn) > 0.5f);
     dir.deleteRecursively();
+}
+
+DTEST(auto_listen_follows_the_track_by_itself_and_never_needs_a_file)
+{
+    setupEnv();
+    CandyProcessor p(true); prepare(p, 44100.0, 512);
+    CHECK(getP(p, pid::autoListen) > 0.5f); CHECK(getP(p, pid::seqOn) < 0.5f);
+    const double sr = 44100.0; const int bars = 8; const int N = (int) (bars * 2.0 * sr); std::vector<float> x((size_t) N, 0.0f); juce::Random rnd(9);
+    for (int bar = 0; bar < bars; ++bar) { if (bar == 4) continue;
+        for (int beat = 0; beat < 4; ++beat) { const int k = (int) ((bar * 4 + beat) * 0.5 * sr);
+            for (int i = 0; i < 9000 && k + i < N; ++i) x[(size_t) (k + i)] += 0.7f * std::sin(6.28318f * 55.0f * (float) i / (float) sr) * std::exp(-(float) i / 2500.0f) + 0.15f * std::sin(6.28318f * 220.0f * (float) i / (float) sr) * std::exp(-(float) i / 9000.0f);
+            const int h = k + (int) (0.25 * sr); for (int i = 0; i < 1200 && h + i < N; ++i) x[(size_t) (h + i)] += 0.12f * (rnd.nextFloat() * 2 - 1) * std::exp(-(float) i / 300.0f); } }
+    TestPlayHead ph; ph.bpm = 120.0; juce::AudioBuffer<float> buf(2, 512); juce::MidiBuffer midi; p.setPlayHead(&ph);
+    auto play = [&](int fromSample, int toSample)
+    {
+        for (int pos = fromSample; pos < toSample; pos += 512)
+        {   for (int i = 0; i < 512; ++i) { const float v = x[(size_t) ((pos + i) % N)]; buf.setSample(0, i, v); buf.setSample(1, i, v); }
+            ph.ppq = 32.0 + (double) pos / sr * 2.0; p.processBlock(buf, midi);
+            if ((pos / 512) % 40 == 0) juce::MessageManager::getInstance()->runDispatchLoopUntil(1); }
+    };
+    play(0, (int) (2.0 * 2.0 * sr));                                         // two bars: too early to act
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(200);
+    CHECK(p.analysis() == nullptr); CHECK(getP(p, pid::seqOn) < 0.5f); CHECK(p.statusText().contains("Auto-listening"));
+    play((int) (2.0 * 2.0 * sr), N);                                          // eight bars heard: it builds on its own
+    p.setPlayHead(nullptr);
+    CHECK(waitFor([&] { auto a = p.analysis(); auto pt = p.pattern(); return a && a->valid && pt && ! pt->events.empty() && p.candidates().size() >= 5; }));
+    CHECK(getP(p, pid::seqOn) > 0.5f);
+    auto a = p.analysis(); CHECK(a && a->bars >= 4);
+    auto pt = p.pattern(); const double len = (double) pt->cfg.bars * 4.0; for (auto& e : pt->events) CHECK(e.position >= 0.0 && e.position < len + 1e-6);
+    // the user switches the sequence off: the next automatic refresh must not switch it on again
+    setP(p, pid::seqOn, 0);
+    p.setPlayHead(&ph);
+    for (int rep = 0; rep < 2; ++rep) play(0, N);
+    p.setPlayHead(nullptr);
+    CHECK_MSG(waitFor([&] { return p.analysis() != a; }, 20000), "no automatic refresh of the analysis");
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(500);
+    CHECK(getP(p, pid::seqOn) < 0.5f);
 }

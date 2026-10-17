@@ -223,3 +223,67 @@ DTEST(context_builder_leads_into_section_changes_with_a_transition)
     int risersElsewhere = 0; for (auto& e : ev) if (e.slot == 3 && (e.position < 6.5 || e.position > 8.0)) ++risersElsewhere;
     CHECK_MSG(risersElsewhere <= 1, "transition sounds used away from section changes: " + std::to_string(risersElsewhere));
 }
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// Auto-fill: key detection, dead parts, answers
+// ---------------------------------------------------------------------------------------------------------------------------
+namespace
+{
+std::vector<float> chordAudio(const std::vector<double>& freqs, double sr, double seconds)
+{
+    std::vector<float> x((size_t) (sr * seconds), 0.0f);
+    for (size_t i = 0; i < x.size(); ++i) { double v = 0; for (double f : freqs) { v += std::sin(6.283185307 * f * (double) i / sr) + 0.4 * std::sin(6.283185307 * 2.0 * f * (double) i / sr); } x[i] = (float) (0.1 * v); }
+    return x;
+}
+}
+
+DTEST(key_detection_finds_minor_and_major)
+{
+    const double sr = 44100.0; TrackAnalysis a; a.sampleRate = sr;
+    // A minor: A C E / F A C / G B D / E G# B (i, VI, VII, V)
+    std::vector<float> am; for (auto& ch : std::vector<std::vector<double>> { { 220.0, 261.63, 329.63 }, { 174.61, 220.0, 261.63 }, { 196.0, 246.94, 293.66 }, { 164.81, 207.65, 246.94 } }) { auto c = chordAudio(ch, sr, 2.0); am.insert(am.end(), c.begin(), c.end()); }
+    detectKey(a, am.data(), (int) am.size()); CHECK_MSG(a.keyRoot == 9 && a.keyMinor, "detected root " + std::to_string(a.keyRoot) + " minor " + std::to_string((int) a.keyMinor)); CHECK(a.keyConfidence > 0.3f);
+    // C major: C E G / F A C / G B D / C E G
+    std::vector<float> cm; for (auto& ch : std::vector<std::vector<double>> { { 261.63, 329.63, 392.0 }, { 174.61, 220.0, 261.63 }, { 196.0, 246.94, 293.66 }, { 261.63, 329.63, 392.0 } }) { auto c = chordAudio(ch, sr, 2.0); cm.insert(cm.end(), c.begin(), c.end()); }
+    TrackAnalysis b; b.sampleRate = sr; detectKey(b, cm.data(), (int) cm.size()); CHECK_MSG(b.keyRoot == 0 && ! b.keyMinor, "detected root " + std::to_string(b.keyRoot) + " minor " + std::to_string((int) b.keyMinor));
+    // silence / noise: no confident key
+    std::vector<float> z(44100 * 4, 0.0f); TrackAnalysis c; c.sampleRate = sr; detectKey(c, z.data(), (int) z.size()); CHECK(c.keyRoot < 0);
+}
+
+DTEST(dead_parts_get_a_texture_and_a_pickup_and_hits_get_answers)
+{
+    const double sr = 44100.0; const int bars = 8; const int N = (int) (bars * 2.0 * sr); std::vector<float> x((size_t) N, 0.0f); juce::Random rnd(3);
+    for (int bar = 0; bar < bars; ++bar)
+    {
+        if (bar == 3 || bar == 4) continue;                                                          // the dead part: two empty bars
+        for (int beat = 0; beat < 4; ++beat)
+        {
+            const int k = (int) ((bar * 4 + beat) * 0.5 * sr);
+            for (int i = 0; i < 9000 && k + i < N; ++i) x[(size_t) (k + i)] += 0.8f * std::sin(6.28318f * 55.0f * (float) i / (float) sr) * std::exp(-(float) i / 2500.0f);
+            const int h = k + (int) (0.25 * sr); for (int i = 0; i < 1200 && h + i < N; ++i) x[(size_t) (h + i)] += 0.15f * (rnd.nextFloat() * 2 - 1) * std::exp(-(float) i / 300.0f);
+        }
+    }
+    auto a = analyzeTrack(x.data(), N, sr, 120.0, 4); CHECK(a.valid && a.bars == bars);
+    generateSuggestions(a, 0.5f, 0.0f, 5);
+    const auto dead = findDeadRegions(a); CHECK(dead.size() >= 1);
+    bool covers = false; for (auto [d0, d1] : dead) if (d0 <= 50 && d1 >= 78) covers = true;
+    CHECK_MSG(covers, "dead region found: " + std::to_string(dead.empty() ? -1 : dead[0].first) + ".." + std::to_string(dead.empty() ? -1 : dead[0].second));
+    const auto tex = entry(0, { 0.0f, 0.05f, 0.1f, 0.2f, 0.25f, 0.2f, 0.15f, 0.05f }, MusicalRole::Texture, 1800.0f);
+    const auto riser = entry(1, { 0.0f, 0.0f, 0.05f, 0.15f, 0.3f, 0.3f, 0.15f, 0.05f }, MusicalRole::Transition, 900.0f);
+    const auto tick = entry(2, { 0.0f, 0.0f, 0.1f, 0.3f, 0.3f, 0.2f, 0.08f, 0.02f }, MusicalRole::Punctuation, 90.0f);
+    const auto acc = entry(3, { 0.0f, 0.0f, 0.1f, 0.25f, 0.3f, 0.25f, 0.08f, 0.02f }, MusicalRole::Accent, 200.0f);
+    ContextOptions o; o.variety = 0.3f; o.amount = 0.6f; ContextReport rep; auto ev = buildContextEvents(a, { tex, riser, tick, acc }, o, &rep);
+    int inDead = 0, texInDead = 0, riserBeforeReturn = 0, onHit = 0;
+    for (auto& e : ev)
+    {
+        const int s = (int) std::lround(e.position / 0.25);
+        if (s >= 48 && s < 80) { ++inDead; if (e.slot == 0) ++texInDead; }
+        if (e.slot == 1 && s >= 72 && s <= 79) ++riserBeforeReturn;
+        if (s >= 0 && s < a.numSteps && a.onset[(size_t) s] > 0.45f) ++onHit;
+    }
+    CHECK_MSG(inDead >= 1 && texInDead >= 1, "events in the dead part " + std::to_string(inDead) + ", textures " + std::to_string(texInDead));
+    CHECK_MSG(riserBeforeReturn >= 1, "no pick-up before the track returns");
+    CHECK_MSG(rep.answers >= 1, "answers to hits " + std::to_string(rep.answers));
+    CHECK_MSG(onHit == 0, "events on a hit: " + std::to_string(onHit));
+    CHECK_MSG(rep.deadRegions >= 1 && rep.deadFills >= 2, "dead fills " + std::to_string(rep.deadFills));
+}

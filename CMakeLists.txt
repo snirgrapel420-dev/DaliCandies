@@ -79,7 +79,8 @@ function(dali_configure_target tgt)
 endfunction()
 
 # ---- plugins ----------------------------------------------------------------
-# The shipping product: ONE plug-in that plays MIDI (instrument) and processes / analyses audio (effect).
+# The shipping product: ONE plug-in. It is registered as an EFFECT so that hosts (Ableton) give it the audio of the track it sits on;
+# that audio is what it listens to. MIDI is still accepted where the host sends it; use "DaliCandy Instrument" for a MIDI-only instrument track.
 if(DALI_BUILD_PLUGIN)
     juce_add_plugin(DaliCandy
         COMPANY_NAME "Dali Audio"
@@ -88,11 +89,11 @@ if(DALI_BUILD_PLUGIN)
         FORMATS VST3
         BUNDLE_ID com.daliaudio.dalicandy
         PRODUCT_NAME "DaliCandy"
-        IS_SYNTH TRUE
+        IS_SYNTH FALSE
         NEEDS_MIDI_INPUT TRUE
         NEEDS_MIDI_OUTPUT FALSE
         EDITOR_WANTS_KEYBOARD_FOCUS FALSE
-        VST3_CATEGORIES Instrument Synth Fx
+        VST3_CATEGORIES Fx
         COPY_PLUGIN_AFTER_BUILD FALSE)
     target_sources(DaliCandy PRIVATE ${DALI_CORE_SOURCES} ${DALI_PLUGIN_SOURCES} ${DALI_UI_SOURCES})
     dali_configure_target(DaliCandy DALI_IS_FX=1 DALI_WITH_EDITOR=1)
